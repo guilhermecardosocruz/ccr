@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { getSession, setSession } from "@/lib/session";
 import Link from "next/link";
 import { createEvent, listEvents, clearTeamsAndRuns } from "@/lib/events";
-import { setEventPins, getEventPins } from "@/lib/pin";
+import { setEventPins } from "@/lib/pin";
 
 function genNumeric(n:number){ return Array.from({length:n},()=>Math.floor(Math.random()*10)).join(""); }
 function genAlphaNum(n:number){ const cs="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let o=""; for(let i=0;i<n;i++) o+=cs[Math.floor(Math.random()*cs.length)]; return o; }
@@ -51,7 +51,7 @@ function GestorInner() {
     const n = name.trim(); if (!n) return;
     const e = await createEvent(n);
     setName(""); await refresh();
-    // gera PINs padrão
+    // gera PINs padrão (compat: cliente gera e envia)
     const j = genNumeric(6), c = genAlphaNum(8);
     await setEventPins(e.id, j, c);
     setPlainPins({ judgePin: j, coordPin: c });
@@ -62,6 +62,22 @@ function GestorInner() {
     const s = getSession();
     setSession({ ...s, eventId: id });
     alert("Evento ativo selecionado.");
+  }
+
+  // Mostrar PINs: sempre pedir novos (rotate:true) para exibir plaintext
+  async function showPins(id: string) {
+    try {
+      const res = await setEventPins(id, { rotate: true });
+      if (!res.ok) {
+        alert("Falha ao obter PINs: " + (res.error || "erro desconhecido"));
+        return;
+      }
+      setPlainPins(res.pins || {});
+      setShowPinsOf(id);
+    } catch (err) {
+      console.error("showPins error", err);
+      alert("Erro ao solicitar PINs.");
+    }
   }
 
   async function rotatePins(id: string) {
@@ -107,11 +123,7 @@ function GestorInner() {
             ) : events.map((e,i)=>(
               <tr key={e.id} className={i%2?"bg-white":"bg-gray-50/60"}>
                 <td className="px-3 py-2">{e.name}</td>
-                <td className="px-3 py-2">
-                  {/* mostramos máscara baseada no GET do servidor */}
-                  {/* opcional: consultar /pins para saber se existem */}
-                  ••••••
-                </td>
+                <td className="px-3 py-2">••••••</td>
                 <td className="px-3 py-2">••••••••</td>
                 <td className="px-3 py-2 flex flex-wrap gap-2">
                   <button onClick={()=>makeActive(e.id)} className="px-2 py-1 border rounded-md">Ativar evento</button>
@@ -119,7 +131,7 @@ function GestorInner() {
                   <Link href="/equipes" className="px-2 py-1 border rounded-md">Equipes</Link>
                   <Link href="/resultado" className="px-2 py-1 border rounded-md">Resultado</Link>
                   <Link href="/coordenacao" className="px-2 py-1 border rounded-md">Coordenação</Link>
-                  <button onClick={()=>setShowPinsOf(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
+                  <button onClick={()=>showPins(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
                   <button onClick={()=>rotatePins(e.id)} className="px-2 py-1 border rounded-md">Rotacionar PINs</button>
                   <button onClick={()=>resetData(e.id)} className="px-2 py-1 border rounded-md">Limpar dados</button>
                 </td>
@@ -129,7 +141,6 @@ function GestorInner() {
         </table>
       </section>
 
-      {/* Modal para exibir PINs em texto (gerados agora) */}
       <Modal
         open={!!showPinsOf}
         onClose={()=>setShowPinsOf(null)}
@@ -151,7 +162,7 @@ function GestorInner() {
               </div>
               {plainPins.coordPin && <button onClick={()=>copy(plainPins.coordPin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
             </div>
-            <p className="text-xs text-gray-500">Obs.: por segurança, o servidor armazena apenas os hashes; estes valores só aparecem aqui no momento da geração.</p>
+            <p className="text-xs text-gray-500">Obs.: por segurança, o servidor armazena apenas hashes; ao solicitar, geramos novos PINs para exibir.</p>
           </div>
         )}
       </Modal>
