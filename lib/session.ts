@@ -12,8 +12,16 @@ const KEY = "ccr-session";
 export function getSession(): Session {
   return loadJSON<Session>(KEY, { authed:false, role:null, pin:null, eventId:null });
 }
-export function setSession(s: Session) { saveJSON(KEY, s); }
-export function clearSession() { removeKey(KEY); }
+
+export function setSession(s: Session) { 
+  saveJSON(KEY, s); 
+}
+
+export function clearSession() { 
+  removeKey(KEY); 
+}
+
 export function requireEventId(): string|null {
-  const s = getSession(); return s.eventId;
+  const s = getSession(); 
+  return s.eventId;
 }

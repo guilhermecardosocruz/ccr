@@ -12,24 +12,24 @@ export default function RouteGuard({ need, needEvent = false, children }:{
   const router = useRouter();
   const [ok, setOk] = useState(false);
 
-  useEffect(() => {
+  useEffect(()=>{
     const s = getSession();
     if (!s.authed || !s.role) {
       router.replace("/login");
       return;
     }
 
-    // Checa se o papel do usuário é válido
+    // Redirecionamento para o Gestor caso não tenha permissão
     if (need !== "any" && s.role !== need) {
       if (s.role === "admin") {
         router.replace("/gestor");
       } else if (s.role === "judge" || s.role === "coord") {
-        router.replace("/planilha"); // Para juiz ou coordenador
+        router.replace("/planilha"); // Redireciona para planilha se for juiz ou coordenador
       }
       return;
     }
 
-    // Verifica se o evento foi selecionado
+    // Verificação de evento
     if (needEvent && !s.eventId) {
       router.replace("/gestor");
       return;
