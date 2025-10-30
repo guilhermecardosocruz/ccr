@@ -15,6 +15,7 @@
 │   │   └── pin-login/
 │   │       └── route.ts
 │   ├── (auth)/
+│   │   ├── layout.tsx
 │   │   └── login/
 │   │       └── page.tsx
 │   ├── coordenacao/
@@ -36,6 +37,8 @@
 │       ├── APP_CORE_DUMP.txt
 │       ├── CORE_LAYOUT_FILES.txt
 │       ├── EVENTS_PIN_API_DUMP.txt
+│       ├── GUARD_PIN_FLOW.txt
+│       ├── PIN_EVENT_FLOW.txt
 │       ├── PIN_FLOW_FILES.txt
 │       ├── PRISMA_ENV_DUMP.txt
 │       └── TREE.txt
@@ -73,6 +76,7 @@
 ├── styles/
 │   └── globals.css
 ├── tailwind.config.js
-└── tsconfig.json
+├── tsconfig.json
+└── tsconfig.tsbuildinfo
 
-27 directories, 48 files
+27 directories, 52 files
