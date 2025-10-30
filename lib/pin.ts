@@ -1,47 +1,76 @@
-/** Utilidades de PIN consumindo a API */
-export async function sha256(text: string): Promise<string> {
-  const enc = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+/**
+ * Normaliza PIN: remove espaços/traços, uppercase e trim.
+ * Ex.: "CCR-ADM-9073" => "CCRADM9073"
+ */
+export function normalizePin(s: string) {
+  return String(s || "").replace(/[\s-]+/g, "").toUpperCase().trim();
 }
 
-// Admin PIN
-export async function adminConfigured(): Promise<boolean> {
-  const res = await fetch("/api/admin-pin", { cache: "no-store" });
-  const j = await res.json();
-  return !!j?.configured;
+export type EventPinsInfo = {
+  ok: boolean;
+  hasJudge?: boolean;
+  hasCoord?: boolean;
+  rotatedAt?: string | null;
+  error?: string;
+};
+
+export type SetEventPinsBody = {
+  rotate?: boolean;
+  judgePin?: string;
+  coordPin?: string;
+};
+
+export type SetEventPinsResp = {
+  ok: boolean;
+  pins?: { judgePin?: string; coordPin?: string };
+  error?: string;
+};
+
+/** GET /api/events/[id]/pins */
+export async function getEventPins(eventId: string): Promise<EventPinsInfo> {
+  const url = `/api/events/${eventId}/pins`;
+  const res = await fetch(url, { method: "GET", cache: "no-store" });
+  const data = (await res.json().catch(() => ({}))) as EventPinsInfo;
+  if (!res.ok) return { ok: false, error: data?.error || `http_${res.status}` };
+  return { ok: true, hasJudge: data.hasJudge, hasCoord: data.hasCoord, rotatedAt: data.rotatedAt ?? null };
 }
 
-export async function setupAdminPin(pin: string): Promise<void> {
-  await fetch("/api/admin-pin", { method: "POST", headers: { "content-type":"application/json" }, body: JSON.stringify({ pin }) });
-}
+/**
+ * POST /api/events/[id]/pins
+ * Uso 1: setEventPins(eventId, { rotate:true })       // rotaciona
+ * Uso 2: setEventPins(eventId, { judgePin, coordPin })// define manual
+ * Uso 3: setEventPins(eventId, judgePin, coordPin)    // compatibilidade legado
+ */
+export async function setEventPins(eventId: string, body: SetEventPinsBody): Promise<SetEventPinsResp>;
+export async function setEventPins(eventId: string, judgePin: string, coordPin: string): Promise<SetEventPinsResp>;
+export async function setEventPins(
+  eventId: string,
+  arg2: SetEventPinsBody | string,
+  arg3?: string
+): Promise<SetEventPinsResp> {
+  // Monta o body aceitando 2 ou 3 argumentos
+  let payload: SetEventPinsBody;
+  if (typeof arg2 === "string") {
+    // forma legacy: (eventId, judgePin, coordPin)
+    payload = {
+      judgePin: normalizePin(arg2),
+      coordPin: normalizePin(arg3 || ""),
+    };
+  } else {
+    // forma nova: (eventId, body)
+    payload = { ...arg2 };
+    if (payload.judgePin) payload.judgePin = normalizePin(payload.judgePin);
+    if (payload.coordPin) payload.coordPin = normalizePin(payload.coordPin);
+  }
 
-export async function checkAdminPin(pin: string): Promise<boolean> {
-  const r = await fetch("/api/admin-pin", { method: "PUT", headers: { "content-type":"application/json" }, body: JSON.stringify({ pin }) });
-  const j = await r.json();
-  return !!j?.match;
-}
-
-// Event PINs
-export async function setEventPins(eventId: string, judgePin: string, coordPin: string) {
-  await fetch(`/api/events/${eventId}/pins`, {
-    method: "PUT",
-    headers: { "content-type":"application/json" },
-    body: JSON.stringify({ judgePin, coordPin })
-  });
-}
-
-export async function getEventPins(eventId: string): Promise<{ hasJudge: boolean; hasCoord: boolean }> {
-  const r = await fetch(`/api/events/${eventId}/pins`, { cache: "no-store" });
-  return r.json();
-}
-
-// Login por PIN (juiz/coord)
-export async function loginByPin(pin: string): Promise<{ ok: boolean; role?: "judge"|"coord"; eventId?: string }> {
-  const r = await fetch("/api/pin-login", {
+  const url = `/api/events/${eventId}/pins`;
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type":"application/json" },
-    body: JSON.stringify({ pin })
+    headers: { "content-type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify(payload),
   });
-  return r.json();
+  const data = (await res.json().catch(() => ({}))) as SetEventPinsResp;
+  if (!res.ok) return { ok: false, error: data?.error || `http_${res.status}` };
+  return { ok: true, pins: data?.pins };
 }
