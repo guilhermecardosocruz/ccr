@@ -1,4 +1,4 @@
-import "../globals.css";
+import "@/styles/globals.css";
 import AppMenu from "@/components/AppMenu";
 
 export const metadata = {
