@@ -4,22 +4,47 @@ import { useEffect, useState } from "react";
 import { getSession } from "@/lib/session";
 import { useRouter } from "next/navigation";
 
-export default function RouteGuard({ need, needEvent = false, children }:{
-  need: "any"|"admin"|"judge"|"coord"|"judge_or_coord",
-  needEvent?: boolean,
-  children: React.ReactNode
+type Need = "any" | "admin" | "judge" | "coord" | "judge_or_coord";
+
+export default function RouteGuard({
+  need,
+  needEvent = false,
+  children,
+}: {
+  need: Need;
+  needEvent?: boolean;
+  children: React.ReactNode;
 }) {
   const router = useRouter();
   const [ok, setOk] = useState(false);
 
-  useEffect(()=>{
+  useEffect(() => {
     const s = getSession();
-    if (!s.authed || !s.role) { router.replace("/login"); return; }
-    if (need !== "any" && s.role !== need) {
-      if (s.role === "admin") router.replace("/gestor"); else router.replace("/planilha");
+
+    // precisa estar logado
+    if (!s.authed || !s.role) {
+      router.replace("/login");
       return;
     }
-    if (needEvent && !s.eventId) { router.replace("/gestor"); return; }
+
+    // checa permissão
+    const allowed =
+      need === "any" ||
+      (need === "judge_or_coord" && (s.role === "judge" || s.role === "coord")) ||
+      s.role === need;
+
+    if (!allowed) {
+      if (s.role === "admin") router.replace("/gestor");
+      else router.replace("/planilha");
+      return;
+    }
+
+    // precisa de evento ativo?
+    if (needEvent && !s.eventId) {
+      router.replace(s.role === "admin" ? "/gestor" : "/login");
+      return;
+    }
+
     setOk(true);
   }, [router, need, needEvent]);
 
