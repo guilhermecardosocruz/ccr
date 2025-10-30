@@ -9,12 +9,14 @@ import { listEvents } from "@/lib/events";
 export default function AppMenu() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [authed, setAuthed] = useState(false);
   const [role, setRole] = useState<"admin" | "judge" | "coord" | null>(null);
   const [eventId, setEventId] = useState<string | null>(null);
   const [eventName, setEventName] = useState<string>("");
 
   useEffect(() => {
     const s = getSession();
+    setAuthed(!!s.authed && !!s.role);
     setRole(s.role);
     setEventId(s.eventId);
     setReady(true);
@@ -47,43 +49,45 @@ export default function AppMenu() {
           <div className="h-6 w-40 rounded bg-gray-200 animate-pulse" />
         ) : (
           <div className="flex items-center gap-4 text-sm">
-            {role === "admin" ? (
+            {authed ? (
               <>
-                <Link href="/gestor" className="hover:underline">Gestor</Link>
-                {!!eventId && (
+                {role === "admin" ? (
                   <>
-                    <span className="text-gray-500 truncate max-w-[14rem]" title={eventName || eventId}>
-                      Evento: {eventName || eventId}
-                    </span>
+                    <Link href="/gestor" className="hover:underline">Gestor</Link>
+                    {!!eventId && (
+                      <>
+                        <span className="text-gray-500 truncate max-w-[14rem]" title={eventName || eventId}>
+                          Evento: {eventName || eventId}
+                        </span>
+                        <Link href="/planilha" className="hover:underline">Planilha</Link>
+                        <Link href="/equipes" className="hover:underline">Equipes</Link>
+                        <Link href="/resultado" className="hover:underline">Resultado</Link>
+                        <Link href="/coordenacao" className="hover:underline">Coordenação</Link>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
                     <Link href="/planilha" className="hover:underline">Planilha</Link>
                     <Link href="/equipes" className="hover:underline">Equipes</Link>
                     <Link href="/resultado" className="hover:underline">Resultado</Link>
                     <Link href="/coordenacao" className="hover:underline">Coordenação</Link>
                   </>
                 )}
-              </>
-            ) : role ? (
-              <>
-                <Link href="/planilha" className="hover:underline">Planilha</Link>
-                <Link href="/equipes" className="hover:underline">Equipes</Link>
-                <Link href="/resultado" className="hover:underline">Resultado</Link>
-                <Link href="/coordenacao" className="hover:underline">Coordenação</Link>
+
+                {/* Sair: somente quando logado */}
+                <button
+                  onClick={onLogout}
+                  className="px-2 py-1 border rounded-md"
+                  title="Encerrar sessão"
+                >
+                  Sair
+                </button>
               </>
             ) : (
-              // Sem sessão: ainda assim mostramos atalhos úteis
-              <>
-                <Link href="/login" className="hover:underline">Login</Link>
-              </>
+              // Não logado: sem botão Sair, só o atalho de Login
+              <Link href="/login" className="hover:underline">Login</Link>
             )}
-
-            {/* Botão Sair SEMPRE visível, inclusive no /login e mesmo sem sessão */}
-            <button
-              onClick={onLogout}
-              className="px-2 py-1 border rounded-md"
-              title="Limpar sessão e voltar ao login"
-            >
-              Sair
-            </button>
           </div>
         )}
       </div>
