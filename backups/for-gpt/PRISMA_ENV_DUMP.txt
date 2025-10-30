@@ -1,0 +1,157 @@
+
+===== prisma.config.ts =====
+1 import { defineConfig, env } from "prisma/config";
+2 
+3 export default defineConfig({
+4   schema: "prisma/schema.prisma",
+5   migrations: {
+6     path: "prisma/migrations",
+7   },
+8   engine: "classic",
+9   datasource: {
+10     url: env("DATABASE_URL"),
+11   },
+12 });
+
+===== prisma/schema.prisma =====
+1 generator client {
+2   provider = "prisma-client-js"
+3 }
+4 
+5 datasource db {
+6   provider  = "postgresql"
+7   url       = env("DATABASE_URL")
+8   directUrl = env("DIRECT_URL")
+9 }
+10 
+11 model Event {
+12   id         String    @id @default(cuid())
+13   name       String
+14   archived   Boolean   @default(false)
+15   createdAt  DateTime  @default(now())
+16 
+17   pins   EventPins?
+18   teams  Team[]
+19   runs   Run[]
+20 
+21   @@index([createdAt])
+22 }
+23 
+24 model EventPins {
+25   eventId   String   @id
+26   judgeHash String?
+27   coordHash String?
+28   rotatedAt DateTime @default(now())
+29 
+30   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+31 }
+32 
+33 model Team {
+34   id        String   @id @default(cuid())
+35   eventId   String
+36   name      String
+37   school    String?
+38   category  String?
+39   createdAt DateTime  @default(now())
+40 
+41   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+42   runs  Run[]
+43 
+44   @@unique([eventId, name])
+45   @@index([eventId])
+46   @@index([createdAt])
+47 }
+48 
+49 model Run {
+50   id        String   @id @default(cuid())
+51   eventId   String
+52   teamId    String
+53   score     Decimal  @db.Numeric(10, 2)
+54   timeSec   Int
+55   notes     String?
+56   createdAt DateTime @default(now())
+57 
+58   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+59   team  Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+60 
+61   @@index([eventId, teamId, createdAt])
+62   @@index([eventId, createdAt])
+63 }
+64 
+65 model AppSetting {
+66   key   String @id     // ex.: "admin_pin_hash"
+67   value String
+68 }
+
+===== .env =====
+1 DATABASE_URL="postgresql://neondb_owner:npg_k9KF4uVhNszL@ep-mute-pine-adcazqfg-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+2 DIRECT_URL="postgresql://neondb_owner:npg_k9KF4uVhNszL@ep-mute-pine-adcazqfg.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
+===== .env.example =====
+1 DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require&channel_binding=require"
+2 DIRECT_URL="postgresql://user:password@host/dbname?sslmode=require&channel_binding=require"
+
+===== .env.exemple =====
+[MISSING] .env.exemple
+
+===== .env.local =====
+1 DATABASE_URL="postgresql://neondb_owner:npg_k9KF4uVhNszL@ep-mute-pine-adcazqfg-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+2 DIRECT_URL="postgresql://neondb_owner:npg_k9KF4uVhNszL@ep-mute-pine-adcazqfg.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
+===== app/api/events/[id]/teams/route.ts =====
+1 import { prisma } from "@/lib/db";
+2 
+3 export const runtime = "nodejs";
+4 export const dynamic = "force-dynamic";
+5 
+6 // GET -> lista nomes
+7 export async function GET(_req: Request, { params }: { params: { id: string } }) {
+8   const rows = await prisma.team.findMany({
+9     where: { eventId: params.id },
+10     orderBy: { createdAt: "asc" },
+11     select: { id: true, name: true }
+12   });
+13   return new Response(JSON.stringify(rows), { headers: { "content-type": "application/json" } });
+14 }
+15 
+16 // POST { name }
+17 export async function POST(req: Request, { params }: { params: { id: string } }) {
+18   try {
+19     const { name } = await req.json();
+20     if (!name || typeof name !== "string") return new Response(JSON.stringify({ ok:false, error:"invalid_name" }), { status: 400 });
+21     const row = await prisma.team.create({ data: { eventId: params.id, name: name.trim() } });
+22     return new Response(JSON.stringify({ ok:true, team: row }), { headers: { "content-type": "application/json" } });
+23   } catch (e:any) {
+24     return new Response(JSON.stringify({ ok:false, error:"duplicated_or_bad" }), { status: 400 });
+25   }
+26 }
+27 
+28 // PUT { oldName, newName }
+29 export async function PUT(req: Request, { params }: { params: { id: string } }) {
+30   try {
+31     const { oldName, newName } = await req.json();
+32     if (!oldName || !newName) return new Response(JSON.stringify({ ok:false, error:"invalid" }), { status: 400 });
+33     const team = await prisma.team.findFirst({ where: { eventId: params.id, name: oldName } });
+34     if (!team) return new Response(JSON.stringify({ ok:false, error:"not_found" }), { status: 404 });
+35     await prisma.team.update({ where: { id: team.id }, data: { name: String(newName) } });
+36     return new Response(JSON.stringify({ ok:true }), { headers: { "content-type": "application/json" } });
+37   } catch {
+38     return new Response(JSON.stringify({ ok:false, error:"bad_request" }), { status: 400 });
+39   }
+40 }
+41 
+42 // DELETE -> { name? } se enviar name, exclui uma; sem body: limpa todas
+43 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+44   try {
+45     const body = await req.json().catch(()=> ({}));
+46     if (body?.name) {
+47       await prisma.team.deleteMany({ where: { eventId: params.id, name: String(body.name) } });
+48     } else {
+49       await prisma.run.deleteMany({ where: { eventId: params.id } });
+50       await prisma.team.deleteMany({ where: { eventId: params.id } });
+51     }
+52     return new Response(JSON.stringify({ ok:true }), { headers: { "content-type": "application/json" } });
+53   } catch {
+54     return new Response(JSON.stringify({ ok:false, error:"bad_request" }), { status: 400 });
+55   }
+56 }

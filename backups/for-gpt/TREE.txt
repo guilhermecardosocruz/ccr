@@ -1,5 +1,19 @@
 ./
 ├── app/
+│   ├── api/
+│   │   ├── admin-pin/
+│   │   │   └── route.ts
+│   │   ├── events/
+│   │   │   ├── [id]/
+│   │   │   │   ├── pins/
+│   │   │   │   │   └── route.ts
+│   │   │   │   ├── runs/
+│   │   │   │   │   └── route.ts
+│   │   │   │   └── teams/
+│   │   │   │       └── route.ts
+│   │   │   └── route.ts
+│   │   └── pin-login/
+│   │       └── route.ts
 │   ├── (auth)/
 │   │   └── login/
 │   │       └── page.tsx
@@ -19,15 +33,25 @@
 │       └── page.tsx
 ├── backups/
 │   └── for-gpt/
+│       ├── APP_CORE_DUMP.txt
 │       ├── CORE_LAYOUT_FILES.txt
+│       ├── EVENTS_PIN_API_DUMP.txt
+│       ├── PIN_FLOW_FILES.txt
+│       ├── PRISMA_ENV_DUMP.txt
 │       └── TREE.txt
 ├── components/
 │   ├── AppMenu.tsx
 │   └── RouteGuard.tsx
+├── .env
+├── .env.example
+├── .env.local
 ├── .gitignore
 ├── lib/
+│   ├── crypto.ts
+│   ├── db.ts
 │   ├── events.ts
 │   ├── pin.ts
+│   ├── prisma.ts
 │   ├── ranking.ts
 │   ├── session.ts
 │   └── storage.ts
@@ -35,11 +59,20 @@
 ├── package.json
 ├── pnpm-lock.yaml
 ├── postcss.config.js
+├── prisma/
+│   ├── migrations/
+│   │   ├── 20251030030155_init_ccr_neon/
+│   │   │   └── migration.sql
+│   │   └── migration_lock.toml
+│   └── schema.prisma
 ├── public/
 ├── README.md
+├── scripts/
+│   ├── db-check.mjs
+│   └── seed-admin-pin.mjs
 ├── styles/
 │   └── globals.css
 ├── tailwind.config.js
 └── tsconfig.json
 
-15 directories, 27 files
+27 directories, 48 files
