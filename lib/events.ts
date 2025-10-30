@@ -61,7 +61,9 @@ export type Run = { team: string; score: number; timeSec: number; at: number };
 
 export async function listRuns(eventId: string): Promise<Run[]> {
   const r = await fetch(`/api/events/${eventId}/runs`, { cache: "no-store" });
-  return r.json();
+  const data = await r.json();
+  // API já retorna Run[]; garantimos types coerentes:
+  return (Array.isArray(data) ? data : []) as Run[];
 }
 
 export async function addRun(eventId: string, teamName: string, score: number, timeSec: number, notes?: string) {
