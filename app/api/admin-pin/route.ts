@@ -4,15 +4,25 @@ import { sha256Hex, genAlphaNum } from "@/lib/crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET: só informa se está configurado
+// GET: informa se existe configuração (ENV ou banco)
 export async function GET() {
+  const hasEnv = Boolean(process.env.ADMIN_MASTER_PIN?.trim());
+  if (hasEnv) {
+    return Response.json({ ok: true, configured: true, source: "env" });
+  }
   const row = await prisma.appSetting.findUnique({ where: { key: "admin_pin_hash" } });
-  return Response.json({ ok: true, configured: Boolean(row?.value) });
+  return Response.json({ ok: true, configured: Boolean(row?.value), source: "db" });
 }
 
 // POST: { adminPin?: string, rotate?: boolean } -> retorna adminPin só nessa resposta
 export async function POST(req: Request) {
   try {
+    const hasEnv = Boolean(process.env.ADMIN_MASTER_PIN?.trim());
+    if (hasEnv) {
+      // Evita sobrescrever caso esteja usando ENV
+      return new Response(JSON.stringify({ ok: false, error: "env_master_pin_in_use" }), { status: 409 });
+    }
+
     const body = await req.json().catch(() => ({}));
     let adminPin: string | undefined = body.adminPin ? String(body.adminPin).trim() : undefined;
 
