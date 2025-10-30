@@ -1,8 +1,8 @@
+import prisma from "@/lib/prisma";
+import { NextResponse } from "next/server";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-import prisma from "../../../../../lib/prisma";
-import { NextResponse } from "next/server";
 
 export async function GET(_req: Request, ctx: any) {
   try {
