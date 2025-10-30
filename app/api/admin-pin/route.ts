@@ -14,12 +14,19 @@ export async function GET() {
   return Response.json({ ok: true, configured: Boolean(row?.value), source: "db" });
 }
 
-// POST: { adminPin?: string, rotate?: boolean } -> retorna adminPin só nessa resposta
+// POST / PUT: cria ou rotaciona o PIN do admin
 export async function POST(req: Request) {
+  return handleUpsert(req);
+}
+export async function PUT(req: Request) {
+  return handleUpsert(req);
+}
+
+async function handleUpsert(req: Request) {
   try {
     const hasEnv = Boolean(process.env.ADMIN_MASTER_PIN?.trim());
     if (hasEnv) {
-      // Evita sobrescrever caso esteja usando ENV
+      // Se há PIN mestre via ENV, evita sobrescrever
       return new Response(JSON.stringify({ ok: false, error: "env_master_pin_in_use" }), { status: 409 });
     }
 
@@ -37,7 +44,8 @@ export async function POST(req: Request) {
     });
 
     return Response.json({ ok: true, adminPin });
-  } catch {
+  } catch (e) {
+    console.error("Erro em admin-pin:", e);
     return new Response(JSON.stringify({ ok: false, error: "bad_request" }), { status: 400 });
   }
 }
