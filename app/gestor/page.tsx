@@ -131,10 +131,9 @@ function GestorInner() {
                 <td className="px-3 py-2">••••••••</td>
                 <td className="px-3 py-2 flex flex-wrap gap-2">
                   <button onClick={() => makeActive(e.id)} className="px-2 py-1 border rounded-md">Ativar evento</button>
-                  <Link href="/planilha" className="px-2 py-1 border rounded-md">Planilha</Link>
-                  <Link href="/equipes" className="px-2 py-1 border rounded-md">Equipes</Link>
-                  <Link href="/resultado" className="px-2 py-1 border rounded-md">Resultado</Link>
-                  <Link href="/coordenacao" className="px-2 py-1 border rounded-md">Coordenação</Link>
+                  <Link href={`/planilha`} className="px-2 py-1 border rounded-md">Planilha</Link>
+                  <Link href={`/equipes`} className="px-2 py-1 border rounded-md">Equipes</Link>
+                  <Link href={`/coordenacao`} className="px-2 py-1 border rounded-md">Coordenação</Link>
                   <button onClick={() => showPins(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
                   <button onClick={() => rotatePins(e.id)} className="px-2 py-1 border rounded-md">Rotacionar PINs</button>
                   <button onClick={() => resetData(e.id)} className="px-2 py-1 border rounded-md">Limpar dados</button>
