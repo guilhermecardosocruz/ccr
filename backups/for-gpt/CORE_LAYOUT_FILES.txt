@@ -1,0 +1,571 @@
+
+===== app/layout.tsx =====
+1 export const metadata = { title: "CCR • Placar", description: "Planilha interativa de pontuação" };
+2 import "./../styles/globals.css";
+3 
+4 export default function RootLayout({ children }: { children: React.ReactNode }) {
+5   return (
+6     <html lang="pt-BR">
+7       <body>{children}</body>
+8     </html>
+9   );
+10 }
+
+===== app/page.tsx =====
+1 "use client";
+2 
+3 import Link from "next/link";
+4 import { useEffect, useMemo, useRef, useState } from "react";
+5 
+6 /** ================== CONFIGURAÇÃO ================== */
+7 type DKey = "lombadas" | "gap" | "obstaculo" | "intercepcao" | "chegada" | "fato";
+8 type Attempt = 1 | 2 | 3;
+9 
+10 const DESAFIOS: Record<DKey, { title: string; points: number; rows: number }> = {
+11   lombadas:    { title: "Lombadas (15)",       points: 15, rows: 5 },
+12   gap:         { title: "Gap (15)",            points: 15, rows: 5 },
+13   obstaculo:   { title: "Obstáculo (20)",      points: 20, rows: 5 },
+14   intercepcao: { title: "Intercepção (20)",    points: 20, rows: 5 },
+15   chegada:     { title: "Chegada (20)",        points: 20, rows: 5 },
+16   fato:        { title: "Fato Histórico (50)", points: 50, rows: 5 }
+17 };
+18 
+19 const MARCADOR_POR_TENTATIVA: Record<Attempt, number> = { 1: 100, 2: 75, 3: 50 };
+20 const MINA_OPCOES: Record<Attempt, number> = { 1: 1.5, 2: 1.25, 3: 1.15 };
+21 
+22 const makeDesafiosState = () =>
+23   Object.fromEntries(Object.entries(DESAFIOS).map(([k, v]) => [k, Array(v.rows).fill(false)])) as Record<DKey, boolean[]>;
+24 
+25 const formatMMSS = (t: number) =>
+26   `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+27 
+28 /** ================== MODAL SIMPLES ================== */
+29 function Modal({
+30   open, onClose, title, children
+31 }: { open: boolean; onClose: () => void; title?: string; children: React.ReactNode; }) {
+32   if (!open) return null;
+33   return (
+34     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+35       <div className="bg-white rounded-xl shadow-xl border w-full max-w-md p-5">
+36         {title && <h3 className="text-lg font-semibold mb-3">{title}</h3>}
+37         {children}
+38       </div>
+39     </div>
+40   );
+41 }
+42 
+43 /** ================== PÁGINA PRINCIPAL ================== */
+44 export default function Page() {
+45   /** EQUIPES (localStorage) */
+46   const [teams, setTeams] = useState<string[]>([]);
+47   const [selected, setSelected] = useState<string>("");
+48 
+49   useEffect(() => {
+50     const saved = localStorage.getItem("ccr-teams");
+51     if (saved) setTeams(JSON.parse(saved));
+52   }, []);
+53   useEffect(() => {
+54     localStorage.setItem("ccr-teams", JSON.stringify(teams));
+55   }, [teams]);
+56 
+57   const [addOpen, setAddOpen] = useState(false);
+58   const [novoNome, setNovoNome] = useState("");
+59   const addTeam = () => {
+60     const name = novoNome.trim();
+61     if (!name || teams.includes(name)) return;
+62     const list = [...teams, name];
+63     setTeams(list);
+64     setSelected(name);
+65     setNovoNome("");
+66     setAddOpen(false);
+67   };
+68 
+69   /** CRONÔMETRO */
+70   const [durationMin, setDurationMin] = useState(5);
+71   const [timeLeft, setTimeLeft] = useState(durationMin * 60);
+72   const [running, setRunning] = useState(false);
+73 
+74   useEffect(() => {
+75     if (!running) setTimeLeft(durationMin * 60);
+76   }, [durationMin, running]);
+77 
+78   useEffect(() => {
+79     if (!running) return;
+80     const id = setInterval(() => setTimeLeft((t) => (t > 0 ? t - 1 : 0)), 1000);
+81     return () => clearInterval(id);
+82   }, [running]);
+83 
+84   const handleStartPause = () => {
+85     // Só inicia se houver equipe selecionada
+86     if (!selected) return;
+87     if (timeLeft <= 0) setTimeLeft(durationMin * 60);
+88     setRunning((r) => !r);
+89   };
+90   const applyPenaltyMinus1Min = () => running && selected && setTimeLeft((t) => Math.max(0, t - 60));
+91 
+92   /** PLACAR */
+93   const [desafios, setDesafios] = useState(makeDesafiosState());
+94   const [marcadores, setMarcadores] = useState<Record<Attempt, 0 | 1 | 2>>({ 1: 0, 2: 0, 3: 0 });
+95 
+96   // MINA começa sem seleção (0). Quando 0, multiplicador = 1 (neutro).
+97   const [minaPick, setMinaPick] = useState<0 | Attempt>(0);
+98 
+99   // Só marca se: equipe selecionada + timer rodando + tempo > 0
+100   const canScore = Boolean(selected) && running && timeLeft > 0;
+101 
+102   const toggleCell = (d: DKey, i: number) => {
+103     if (!canScore) return;
+104     setDesafios((p) => {
+105       const n = { ...p };
+106       n[d] = [...n[d]];
+107       n[d][i] = !n[d][i];
+108       return n;
+109     });
+110   };
+111   const pickMarcador = (t: Attempt, q: 0 | 1 | 2) => {
+112     if (!canScore) return;
+113     setMarcadores((p) => ({ ...p, [t]: p[t] === q ? 0 : q }));
+114   };
+115 
+116   // SOMAS
+117   const somaCol: Record<DKey, number> = useMemo(() => {
+118     const r: any = {};
+119     (Object.keys(DESAFIOS) as DKey[]).forEach(
+120       (k) => (r[k] = desafios[k].reduce((a, on) => a + (on ? DESAFIOS[k].points : 0), 0))
+121     );
+122     return r as Record<DKey, number>;
+123   }, [desafios]);
+124 
+125   const somaDesafios = (Object.keys(DESAFIOS) as DKey[]).reduce((a, k) => a + somaCol[k], 0);
+126 
+127   const somaMarcadores = (Object.keys(MARCADOR_POR_TENTATIVA) as Attempt[]).reduce((a, t) => {
+128     const q = marcadores[t];
+129     return a + (q === 0 ? 0 : MARCADOR_POR_TENTATIVA[t]);
+130   }, 0);
+131 
+132   const mult = minaPick === 0 ? 1 : MINA_OPCOES[minaPick];
+133   const resultadoFinal = Number(((somaDesafios + somaMarcadores) * mult).toFixed(2));
+134 
+135   const resetAll = () => {
+136     setDesafios(makeDesafiosState());
+137     setMarcadores({ 1: 0, 2: 0, 3: 0 });
+138     setMinaPick(0);
+139     setRunning(false);
+140     setTimeLeft(durationMin * 60);
+141     setSelected("");
+142   };
+143 
+144   /** MENU */
+145   const [menuOpen, setMenuOpen] = useState(false);
+146   const menuRef = useRef<HTMLDivElement>(null);
+147   useEffect(() => {
+148     const fn = (e: MouseEvent) =>
+149       menuRef.current && !menuRef.current.contains(e.target as Node) && setMenuOpen(false);
+150     if (menuOpen) document.addEventListener("mousedown", fn);
+151     return () => document.removeEventListener("mousedown", fn);
+152   }, [menuOpen]);
+153 
+154   // Salva rodada para /resultado (localStorage)
+155   function saveRound() {
+156     if (!selected) { alert("Selecione uma equipe."); return; }
+157     const score = resultadoFinal;
+158     const elapsed = durationMin * 60 - timeLeft; // segundos gastos
+159     const payload = { team: selected, score, timeSec: Math.max(0, elapsed), at: Date.now() };
+160     const key = "ccr-results";
+161     const raw = localStorage.getItem(key);
+162     const arr = raw ? JSON.parse(raw) : [];
+163     arr.push(payload);
+164     localStorage.setItem(key, JSON.stringify(arr));
+165     alert(`Rodada salva!\nEquipe: ${selected}\nPontuação: ${score}\nTempo: ${formatMMSS(payload.timeSec)}`);
+166   }
+167 
+168   /** UI helpers */
+169   const cellCls = (on: boolean) =>
+170     `cell-btn ${on ? "is-on" : "is-off"} ${canScore ? "" : "opacity-50 cursor-not-allowed"}`;
+171 
+172   const maxRows = Math.max(...Object.values(DESAFIOS).map((v) => v.rows));
+173   const canStart = !!selected || running;
+174 
+175   return (
+176     <main className="container-page space-y-6">
+177       {/* TOPO */}
+178       <header className="card p-3 md:p-5">
+179         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+180           {/* Equipe (select) */}
+181           <div className="flex items-center gap-3">
+182             <label className="text-sm text-gray-600">EQUIPE:</label>
+183             <select
+184               className="px-3 py-1.5 border rounded-md bg-white"
+185               value={selected}
+186               onChange={(e) => setSelected(e.target.value)}
+187             >
+188               <option value="">Selecione</option>
+189               {teams.map((t) => (
+190                 <option key={t}>{t}</option>
+191               ))}
+192             </select>
+193           </div>
+194 
+195           {/* Cronômetro + ações */}
+196           <div className="flex flex-wrap items-center gap-3">
+197             <select
+198               className="px-2 py-1.5 border rounded-md bg-white"
+199               value={durationMin}
+200               onChange={(e) => setDurationMin(Number(e.target.value))}
+201               disabled={running}
+202               title={running ? "Pause para alterar a duração" : "Selecione a duração"}
+203             >
+204               {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((m) => (
+205                 <option key={m}>{m}</option>
+206               ))}
+207             </select>
+208 
+209             <div className="text-3xl font-mono">{formatMMSS(timeLeft)}</div>
+210 
+211             <button
+212               onClick={handleStartPause}
+213               className={`px-3 py-2 border rounded-md ${!canStart ? "opacity-50 cursor-not-allowed" : ""}`}
+214               disabled={!canStart}
+215               title={!selected ? "Selecione uma equipe para iniciar" : ""}
+216             >
+217               {running ? "Pausar" : timeLeft <= 0 ? "Reiniciar" : "Iniciar"}
+218             </button>
+219             <button
+220               onClick={applyPenaltyMinus1Min}
+221               disabled={!running || timeLeft <= 0 || !selected}
+222               className={`px-3 py-2 border rounded-md ${
+223                 running && timeLeft > 0 && selected ? "hover:bg-gray-50" : "opacity-50 cursor-not-allowed"
+224               }`}
+225               title={!selected ? "Selecione uma equipe para aplicar penalidade" : ""}
+226             >
+227               Penalidade -1:00
+228             </button>
+229             <button onClick={resetAll} className="px-3 py-2 border rounded-md">Zerar</button>
+230 
+231             {/* Menu */}
+232             <div className="relative" ref={menuRef}>
+233               <button
+234                 onClick={() => setMenuOpen((v) => !v)}
+235                 className="px-3 py-2 border rounded-md hover:bg-gray-50"
+236                 title="Menu"
+237               >
+238                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24">
+239                   <circle cx="12" cy="5" r="1.8" />
+240                   <circle cx="12" cy="12" r="1.8" />
+241                   <circle cx="12" cy="19" r="1.8" />
+242                 </svg>
+243               </button>
+244               {menuOpen && (
+245                 <div className="absolute right-0 mt-2 w-56 rounded-md border bg-white shadow-md z-10">
+246                   <button
+247                     className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+248                     onClick={() => {
+249                       setMenuOpen(false);
+250                       setAddOpen(true);
+251                     }}
+252                   >
+253                     Adicionar equipe
+254                   </button>
+255                   <button
+256                     className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+257                     onClick={() => {
+258                       setMenuOpen(false);
+259                       saveRound();
+260                     }}
+261                   >
+262                     Salvar rodada (resultado)
+263                   </button>
+264                   <Link
+265                     href="/resultado"
+266                     onClick={() => setMenuOpen(false)}
+267                     className="block px-3 py-2 text-sm hover:bg-gray-50"
+268                   >
+269                     Resultado
+270                   </Link>
+271                 </div>
+272               )}
+273             </div>
+274           </div>
+275         </div>
+276 
+277         {!selected ? (
+278           <p className="mt-3 text-xs text-red-600">
+279             Selecione uma equipe para iniciar o tempo e liberar a pontuação.
+280           </p>
+281         ) : (
+282           <p className="mt-3 text-xs text-gray-500">
+283             Pontuações só podem ser marcadas com o cronômetro em andamento.
+284           </p>
+285         )}
+286       </header>
+287 
+288       {/* ================== DESAFIOS DE PISTA ================== */}
+289       <section className="card p-3 md:p-5">
+290         <h2 className="mb-3 grid-head">DESAFIOS DE PISTA</h2>
+291         <div className="sheet">
+292           <table>
+293             <thead>
+294               <tr>
+295                 <th className="w-28"> </th>
+296                 {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+297                   <th key={k}>{DESAFIOS[k].title}</th>
+298                 ))}
+299                 <th className="w-28">SOMA</th>
+300               </tr>
+301             </thead>
+302             <tbody>
+303               {Array.from({ length: maxRows }).map((_, r) => (
+304                 <tr key={r}>
+305                   <td className="text-left px-2"> </td>
+306                   {(Object.keys(DESAFIOS) as DKey[]).map((k) => {
+307                     const cfg = DESAFIOS[k];
+308                     const exists = r < cfg.rows;
+309                     const isOn = exists ? desafios[k][r] : false;
+310                     return (
+311                       <td key={k + r}>
+312                         {exists ? (
+313                           <button
+314                             className={cellCls(isOn)}
+315                             onClick={() => toggleCell(k, r)}
+316                             disabled={!canScore}
+317                             title={`${cfg.points} pontos`}
+318                           >
+319                             {isOn ? cfg.points : ""}
+320                           </button>
+321                         ) : (
+322                           <div className="cell-btn" />
+323                         )}
+324                       </td>
+325                     );
+326                   })}
+327                   <td>
+328                     <div className="cell-btn" />
+329                   </td>
+330                 </tr>
+331               ))}
+332             </tbody>
+333             <tfoot>
+334               <tr>
+335                 <th>SOMA</th>
+336                 {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+337                   <td key={"soma-" + k} className="summary">
+338                     {somaCol[k]}
+339                   </td>
+340                 ))}
+341                 <td className="summary">{somaDesafios}</td>
+342               </tr>
+343             </tfoot>
+344           </table>
+345         </div>
+346       </section>
+347 
+348       {/* ================== MARCADORES ================== */}
+349       <section className="card p-3 md:p-5">
+350         <h2 className="mb-3 grid-head">MARCADORES</h2>
+351         <div className="sheet">
+352           <table>
+353             <thead>
+354               <tr>
+355                 <th>Marcador</th>
+356                 <th>Tentativa 1 (100)</th>
+357                 <th>Tentativa 2 (75)</th>
+358                 <th>Tentativa 3 (50)</th>
+359                 <th>SOMA</th>
+360               </tr>
+361             </thead>
+362             <tbody>
+363               {([1, 2] as (1 | 2)[]).map((m) => (
+364                 <tr key={"m" + m}>
+365                   <td className="font-medium">{`Marcador ${m}`}</td>
+366                   {(Object.keys(MARCADOR_POR_TENTATIVA) as Attempt[]).map((t) => {
+367                     const ativo = marcadores[t] === m;
+368                     return (
+369                       <td key={`m${m}-t${t}`}>
+370                         <button
+371                           className={cellCls(ativo)}
+372                           onClick={() => pickMarcador(t, ativo ? 0 : m)}
+373                           disabled={!canScore}
+374                         >
+375                           {ativo ? MARCADOR_POR_TENTATIVA[t] : ""}
+376                         </button>
+377                       </td>
+378                     );
+379                   })}
+380                   <td>
+381                     <div className="cell-btn"></div>
+382                   </td>
+383                 </tr>
+384               ))}
+385             </tbody>
+386             <tfoot>
+387               <tr>
+388                 <th>SOMA</th>
+389                 <td className="summary">{marcadores[1] ? MARCADOR_POR_TENTATIVA[1] : 0}</td>
+390                 <td className="summary">{marcadores[2] ? MARCADOR_POR_TENTATIVA[2] : 0}</td>
+391                 <td className="summary">{marcadores[3] ? MARCADOR_POR_TENTATIVA[3] : 0}</td>
+392                 <td className="summary">{somaMarcadores}</td>
+393               </tr>
+394             </tfoot>
+395           </table>
+396         </div>
+397       </section>
+398 
+399       {/* ================== MINA ================== */}
+400       <section className="card p-3 md:p-5">
+401         <h2 className="mb-3 grid-head">MINA</h2>
+402         <div className="sheet">
+403           <table>
+404             <thead>
+405               <tr>
+406                 <th>Mina</th>
+407                 <th>Tentativa 1 (1,5x)</th>
+408                 <th>Tentativa 2 (1,25x)</th>
+409                 <th>Tentativa 3 (1,15x)</th>
+410                 <th>Multiplicador</th>
+411               </tr>
+412             </thead>
+413             <tbody>
+414               <tr>
+415                 <td className="font-medium">Mina</td>
+416                 {(Object.keys(MINA_OPCOES) as Attempt[]).map((t) => {
+417                   const ativo = minaPick === t;
+418                   return (
+419                     <td key={`mina-${t}`}>
+420                       <button
+421                         className={`cell-btn ${ativo ? "is-on" : "is-off"}`}
+422                         onClick={() => setMinaPick(ativo ? 0 : t)} // clica de novo para limpar (volta para 0)
+423                         title={ativo ? "Remover mina" : "Selecionar mina"}
+424                       >
+425                         {MINA_OPCOES[t]}
+426                       </button>
+427                     </td>
+428                   );
+429                 })}
+430                 <td className="summary">× {mult}</td>
+431               </tr>
+432             </tbody>
+433           </table>
+434         </div>
+435       </section>
+436 
+437       {/* ================== NOTA FINAL ================== */}
+438       <section className="card p-3 md:p-5">
+439         <h2 className="mb-3 grid-head">Nota final (Obstáculos + Marcadores) × Mina</h2>
+440         <div className="sheet">
+441           <table>
+442             <thead>
+443               <tr>
+444                 <th>DESAFIOS DE PISTA</th>
+445                 <th>MARCADORES</th>
+446                 <th>MINA</th>
+447                 <th>RESULTADO FINAL</th>
+448               </tr>
+449             </thead>
+450             <tbody>
+451               <tr>
+452                 <td className="summary">{somaDesafios}</td>
+453                 <td className="summary">{somaMarcadores}</td>
+454                 <td className="summary">{mult}</td>
+455                 <td className="summary">{resultadoFinal}</td>
+456               </tr>
+457             </tbody>
+458           </table>
+459         </div>
+460       </section>
+461 
+462       {/* MODAL: Adicionar equipe */}
+463       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Adicionar equipe">
+464         <div className="space-y-3">
+465           <input
+466             value={novoNome}
+467             onChange={(e) => setNovoNome(e.target.value)}
+468             className="w-full border rounded-md px-3 py-2"
+469             placeholder="Nome da equipe"
+470             autoFocus
+471           />
+472           <div className="flex justify-end gap-2">
+473             <button onClick={() => setAddOpen(false)} className="px-3 py-2 border rounded-md">
+474               Cancelar
+475             </button>
+476             <button onClick={addTeam} className="px-3 py-2 border rounded-md bg-gray-900 text-white">
+477               Salvar
+478             </button>
+479           </div>
+480         </div>
+481       </Modal>
+482     </main>
+483   );
+484 }
+
+===== styles/globals.css =====
+1 @tailwind base;
+2 @tailwind components;
+3 @tailwind utilities;
+4 
+5 :root { color-scheme: light; }
+6 body { @apply bg-gray-100 text-gray-900; }
+7 
+8 .container-page { @apply max-w-6xl mx-auto p-4 md:p-6; }
+9 .card { @apply bg-white rounded-2xl shadow-sm border border-gray-200; }
+10 .grid-head { @apply text-xs font-semibold text-gray-600 uppercase tracking-wide; }
+11 .badge { @apply inline-flex items-center px-2 py-0.5 text-xs rounded-md bg-gray-100 border border-gray-200; }
+12 
+13 /* ---- aparência de planilha ---- */
+14 .sheet { @apply w-full overflow-auto; }
+15 .sheet table { @apply w-full border-collapse; }
+16 .sheet th, .sheet td { @apply border border-gray-300 text-center align-middle select-none; }
+17 .sheet thead th { @apply bg-gray-50 text-gray-700 font-semibold text-sm; }
+18 .sheet tfoot td, .sheet tfoot th { @apply bg-gray-50 font-semibold; }
+19 .sheet .cell-btn { @apply w-full h-full px-2 py-2 text-sm transition; }
+20 .sheet .is-on { @apply bg-emerald-600 text-white; }
+21 .sheet .is-off { @apply bg-white hover:bg-gray-50; }
+22 .sheet .disabled { @apply opacity-50 cursor-not-allowed hover:bg-white; }
+23 
+24 .summary { @apply text-lg font-semibold; }
+
+===== package.json =====
+1 {
+2   "name": "ccr",
+3   "private": true,
+4   "version": "0.1.0",
+5   "type": "module",
+6   "scripts": {
+7     "dev": "next dev --turbo",
+8     "build": "next build",
+9     "start": "next start",
+10     "typecheck": "tsc --noEmit"
+11   },
+12   "dependencies": {
+13     "next": "15.0.0",
+14     "react": "19.0.0",
+15     "react-dom": "19.0.0"
+16   },
+17   "devDependencies": {
+18     "@types/node": "^22.7.4",
+19     "@types/react": "^19.0.0",
+20     "autoprefixer": "^10.4.20",
+21     "postcss": "^8.4.47",
+22     "tailwindcss": "^3.4.10",
+23     "typescript": "^5.6.3"
+24   }
+25 }
+
+===== tailwind.config.js =====
+1 /** @type {import('tailwindcss').Config} */
+2 export default {
+3   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+4   theme: {
+5     extend: {
+6       fontFamily: { sans: ["ui-sans-serif", "system-ui", "Inter", "Arial", "sans-serif"] }
+7     }
+8   },
+9   plugins: []
+10 };
+
+===== postcss.config.js =====
+1 export default {
+2   plugins: {
+3     tailwindcss: {},
+4     autoprefixer: {}
+5   }
+6 }

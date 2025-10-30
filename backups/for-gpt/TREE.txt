@@ -1,0 +1,45 @@
+./
+├── app/
+│   ├── (auth)/
+│   │   └── login/
+│   │       └── page.tsx
+│   ├── coordenacao/
+│   │   └── page.tsx
+│   ├── equipes/
+│   │   └── page.tsx
+│   ├── gestor/
+│   │   └── page.tsx
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── planilha/
+│   │   └── page.tsx
+│   ├── ranking-coordenacao/
+│   │   └── page.tsx
+│   └── resultado/
+│       └── page.tsx
+├── backups/
+│   └── for-gpt/
+│       ├── CORE_LAYOUT_FILES.txt
+│       └── TREE.txt
+├── components/
+│   ├── AppMenu.tsx
+│   └── RouteGuard.tsx
+├── .gitignore
+├── lib/
+│   ├── events.ts
+│   ├── pin.ts
+│   ├── ranking.ts
+│   ├── session.ts
+│   └── storage.ts
+├── next-env.d.ts
+├── package.json
+├── pnpm-lock.yaml
+├── postcss.config.js
+├── public/
+├── README.md
+├── styles/
+│   └── globals.css
+├── tailwind.config.js
+└── tsconfig.json
+
+15 directories, 27 files
