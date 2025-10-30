@@ -2,17 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getSession } from "@/lib/session";
-import { keyResults } from "@/lib/events";
-import { loadJSON } from "@/lib/storage";
+import { listRuns } from "@/lib/events";
 import { Run, compute } from "@/lib/ranking";
 
 const mmss=(t:number)=>`${String(Math.floor(t/60)).padStart(2,"0")}:${String(t%60).padStart(2,"0")}`;
 
 export default function ResultadoPage(){
   const sess = getSession();
-  const RESULTS_KEY = sess.eventId ? keyResults(sess.eventId) : ""; // público pode não ter sessão admin; então usamos última escolhida no device
+  const eventId = sess.eventId;
   const [runs,setRuns]=useState<Run[]>([]);
-  useEffect(()=>{ if(!RESULTS_KEY) return; setRuns(loadJSON<Run[]>(RESULTS_KEY,[])); },[RESULTS_KEY]);
+  useEffect(()=>{ if(eventId) listRuns(eventId).then(setRuns); },[eventId]);
 
   const byTeam = useMemo(()=>{ const m=new Map<string,Run[]>(); for(const r of runs){ if(!m.has(r.team)) m.set(r.team,[]); m.get(r.team)!.push(r);} for(const a of m.values()) a.sort((x,y)=>x.at-y.at); return m;},[runs]);
   const rows = useMemo(()=>compute(byTeam),[byTeam]);

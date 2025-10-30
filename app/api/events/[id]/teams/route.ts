@@ -1,0 +1,56 @@
+import { prisma } from "@/lib/db";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// GET -> lista nomes
+export async function GET(_req: Request, { params }: { params: { id: string } }) {
+  const rows = await prisma.team.findMany({
+    where: { eventId: params.id },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true }
+  });
+  return new Response(JSON.stringify(rows), { headers: { "content-type": "application/json" } });
+}
+
+// POST { name }
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  try {
+    const { name } = await req.json();
+    if (!name || typeof name !== "string") return new Response(JSON.stringify({ ok:false, error:"invalid_name" }), { status: 400 });
+    const row = await prisma.team.create({ data: { eventId: params.id, name: name.trim() } });
+    return new Response(JSON.stringify({ ok:true, team: row }), { headers: { "content-type": "application/json" } });
+  } catch (e:any) {
+    return new Response(JSON.stringify({ ok:false, error:"duplicated_or_bad" }), { status: 400 });
+  }
+}
+
+// PUT { oldName, newName }
+export async function PUT(req: Request, { params }: { params: { id: string } }) {
+  try {
+    const { oldName, newName } = await req.json();
+    if (!oldName || !newName) return new Response(JSON.stringify({ ok:false, error:"invalid" }), { status: 400 });
+    const team = await prisma.team.findFirst({ where: { eventId: params.id, name: oldName } });
+    if (!team) return new Response(JSON.stringify({ ok:false, error:"not_found" }), { status: 404 });
+    await prisma.team.update({ where: { id: team.id }, data: { name: String(newName) } });
+    return new Response(JSON.stringify({ ok:true }), { headers: { "content-type": "application/json" } });
+  } catch {
+    return new Response(JSON.stringify({ ok:false, error:"bad_request" }), { status: 400 });
+  }
+}
+
+// DELETE -> { name? } se enviar name, exclui uma; sem body: limpa todas
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+  try {
+    const body = await req.json().catch(()=> ({}));
+    if (body?.name) {
+      await prisma.team.deleteMany({ where: { eventId: params.id, name: String(body.name) } });
+    } else {
+      await prisma.run.deleteMany({ where: { eventId: params.id } });
+      await prisma.team.deleteMany({ where: { eventId: params.id } });
+    }
+    return new Response(JSON.stringify({ ok:true }), { headers: { "content-type": "application/json" } });
+  } catch {
+    return new Response(JSON.stringify({ ok:false, error:"bad_request" }), { status: 400 });
+  }
+}

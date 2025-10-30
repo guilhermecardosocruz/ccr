@@ -3,8 +3,7 @@
 import RouteGuard from "@/components/RouteGuard";
 import { useEffect, useMemo, useState } from "react";
 import { getSession } from "@/lib/session";
-import { keyTeams, keyResults } from "@/lib/events";
-import { loadJSON, saveJSON } from "@/lib/storage";
+import { listTeams, addRun } from "@/lib/events";
 
 /** Config */
 type DKey = "lombadas"|"gap"|"obstaculo"|"intercepcao"|"chegada"|"fato";
@@ -32,24 +31,12 @@ export default function Page() {
 
 function Planilha(){
   const sess = getSession();
-  const TEAMS_KEY   = keyTeams(sess.eventId!);
-  const RESULTS_KEY = keyResults(sess.eventId!);
+  const eventId = sess.eventId!;
 
   /** Equipes */
-  const [teams,setTeams]=useState<string[]>([]);
+  const [teams,setTeams]=useState<{id:string; name:string}[]>([]);
   const [selected,setSelected]=useState("");
-  // carga inicial
-  useEffect(()=>{ setTeams(loadJSON<string[]>(TEAMS_KEY,[])); },[TEAMS_KEY]);
-  // escuta alterações do localStorage vindas de OUTRA aba (mesmo domínio)
-  useEffect(()=>{
-    function onStorage(e: StorageEvent){
-      if (e.key === TEAMS_KEY) {
-        setTeams(loadJSON<string[]>(TEAMS_KEY,[]));
-      }
-    }
-    window.addEventListener("storage", onStorage);
-    return ()=>window.removeEventListener("storage", onStorage);
-  },[TEAMS_KEY]);
+  useEffect(()=>{ listTeams(eventId).then(setTeams); },[eventId]);
 
   /** Cronômetro */
   const [durationMin,setDurationMin]=useState(5);
@@ -80,15 +67,11 @@ function Planilha(){
   function resetAll(){ setTab(makeState()); setMark({1:0,2:0,3:0}); setMina(0); setRunning(false); setTimeLeft(durationMin*60); setSelected(""); }
 
   /** salvar rodada (máx 3 por equipe; salva tempo pausado) */
-  function saveRound(){
+  async function saveRound(){
     if(!selected){ alert("Selecione uma equipe."); return; }
-    const arr = loadJSON<any[]>(RESULTS_KEY,[]);
-    const count = arr.filter(r=>r.team===selected).length;
-    if(count>=3){ alert("Esta equipe já possui 3 resultados."); return; }
     const elapsed = durationMin*60 - timeLeft;
-    const payload = { team:selected, score: total, timeSec: Math.max(0,elapsed), at: Date.now() };
-    arr.push(payload); saveJSON(RESULTS_KEY, arr);
-    alert(`Rodada salva!\nEquipe: ${selected}\nPontuação: ${total}\nTempo: ${mmss(payload.timeSec)}`);
+    await addRun(eventId, selected, total, Math.max(0,elapsed));
+    alert(`Rodada salva!\nEquipe: ${selected}\nPontuação: ${total}\nTempo: ${mmss(Math.max(0,elapsed))}`);
   }
 
   const cellCls=(on:boolean)=>`cell-btn ${on?"is-on":"is-off"} ${canScore?"":"opacity-50 cursor-not-allowed"}`;
@@ -102,7 +85,7 @@ function Planilha(){
             <label className="text-sm text-gray-600">EQUIPE:</label>
             <select className="px-3 py-1.5 border rounded-md bg-white" value={selected} onChange={e=>setSelected(e.target.value)}>
               <option value="">Selecione</option>
-              {teams.map(t=><option key={t}>{t}</option>)}
+              {teams.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
             </select>
           </div>
 
@@ -124,7 +107,8 @@ function Planilha(){
         )}
       </header>
 
-      {/* Desafios */}
+      {/* ... (planilha visual idêntica ao seu arquivo) ... */}
+      {/* Abaixo mantemos toda a grade como estava */}
       <section className="card p-3 md:p-5">
         <h2 className="mb-3 grid-head">DESAFIOS DE PISTA</h2>
         <div className="sheet">
@@ -147,7 +131,6 @@ function Planilha(){
         </div>
       </section>
 
-      {/* Marcadores */}
       <section className="card p-3 md:p-5">
         <h2 className="mb-3 grid-head">MARCADORES</h2>
         <div className="sheet">
@@ -176,7 +159,6 @@ function Planilha(){
         </div>
       </section>
 
-      {/* Mina */}
       <section className="card p-3 md:p-5">
         <h2 className="mb-3 grid-head">MINA</h2>
         <div className="sheet">
@@ -196,13 +178,12 @@ function Planilha(){
         </div>
       </section>
 
-      {/* Nota Final */}
       <section className="card p-3 md:p-5">
         <h2 className="mb-3 grid-head">Nota final (Obstáculos + Marcadores) × Mina</h2>
         <div className="sheet">
           <table>
             <thead><tr><th>DESAFIOS DE PISTA</th><th>MARCADORES</th><th>MINA</th><th>RESULTADO FINAL</th></tr></thead>
-            <tbody><tr><td className="summary">{somaDes}</td><td className="summary">{somaMar}</td><td className="summary">{mult}</td><td className="summary">{total}</td></tr></tbody>
+            <tbody><tr><td className="summary">{somaDes}</td><td className="summary">{([1,2,3] as Attempt[]).reduce((a,t)=>a+(mark[t]?MARC[t]:0),0)}</td><td className="summary">{mult}</td><td className="summary">{total}</td></tr></tbody>
           </table>
         </div>
       </section>

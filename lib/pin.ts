@@ -1,39 +1,47 @@
-import { loadJSON, saveJSON } from "./storage";
-
+/** Utilidades de PIN consumindo a API */
 export async function sha256(text: string): Promise<string> {
   const enc = new TextEncoder().encode(text);
   const buf = await crypto.subtle.digest("SHA-256", enc);
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
-/** PINs globais do gestor */
-const ADMIN_KEY = "ccr-admin-pins"; // { adminHash }
-export type AdminPins = { adminHash: string|null };
-export function getAdminPins(): AdminPins {
-  return loadJSON<AdminPins>(ADMIN_KEY, { adminHash: null });
-}
-export function adminConfigured(): boolean {
-  return !!getAdminPins().adminHash;
-}
-export async function setupAdminPin(adminPin: string) {
-  const adminHash = await sha256(adminPin.trim());
-  saveJSON(ADMIN_KEY, { adminHash });
+// Admin PIN
+export async function adminConfigured(): Promise<boolean> {
+  const res = await fetch("/api/admin-pin", { cache: "no-store" });
+  const j = await res.json();
+  return !!j?.configured;
 }
 
-/** PINs por evento */
-export type EventPins = { judgeHash: string|null; coordHash: string|null };
-export function getEventPins(eventId: string): EventPins {
-  return loadJSON<EventPins>(`ccr-evt:${eventId}:pins`, { judgeHash: null, coordHash: null });
+export async function setupAdminPin(pin: string): Promise<void> {
+  await fetch("/api/admin-pin", { method: "POST", headers: { "content-type":"application/json" }, body: JSON.stringify({ pin }) });
 }
+
+export async function checkAdminPin(pin: string): Promise<boolean> {
+  const r = await fetch("/api/admin-pin", { method: "PUT", headers: { "content-type":"application/json" }, body: JSON.stringify({ pin }) });
+  const j = await r.json();
+  return !!j?.match;
+}
+
+// Event PINs
 export async function setEventPins(eventId: string, judgePin: string, coordPin: string) {
-  const judgeHash = await sha256(judgePin.trim());
-  const coordHash = await sha256(coordPin.trim());
-  saveJSON(`ccr-evt:${eventId}:pins`, { judgeHash, coordHash });
-  // Guardar também em texto para mostrar no modal (somente no dispositivo atual)
-  saveJSON(`ccr-evt:${eventId}:pins-plain`, { judgePin, coordPin });
+  await fetch(`/api/events/${eventId}/pins`, {
+    method: "PUT",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({ judgePin, coordPin })
+  });
 }
 
-/** Somente para ler os PINs em texto (UI do gestor) */
-export function getEventPinsPlain(eventId: string): { judgePin?: string; coordPin?: string } {
-  return loadJSON<{judgePin?:string; coordPin?:string}>(`ccr-evt:${eventId}:pins-plain`, {});
+export async function getEventPins(eventId: string): Promise<{ hasJudge: boolean; hasCoord: boolean }> {
+  const r = await fetch(`/api/events/${eventId}/pins`, { cache: "no-store" });
+  return r.json();
+}
+
+// Login por PIN (juiz/coord)
+export async function loginByPin(pin: string): Promise<{ ok: boolean; role?: "judge"|"coord"; eventId?: string }> {
+  const r = await fetch("/api/pin-login", {
+    method: "POST",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({ pin })
+  });
+  return r.json();
 }

@@ -1,35 +1,80 @@
-import { loadJSON, saveJSON } from "./storage";
-import { sha256 } from "./pin";
+export type Event = { id: string; name: string; createdAt: string; archived: boolean };
 
-export type Event = { id: string; name: string; createdAt: number; archived?: boolean };
-
-const EVENTS_KEY = "ccr-events"; // Event[]
-export function listEvents(): Event[] {
-  return loadJSON<Event[]>(EVENTS_KEY, []);
-}
-export function saveEvents(list: Event[]) {
-  saveJSON(EVENTS_KEY, list);
-}
-export function createEvent(name: string): Event {
-  const e: Event = { id: crypto.randomUUID(), name, createdAt: Date.now() };
-  const list = listEvents(); list.push(e); saveEvents(list); return e;
-}
-export function findEvent(eventId: string): Event|undefined {
-  return listEvents().find(e=>e.id===eventId);
+export async function listEvents(): Promise<Event[]> {
+  const r = await fetch("/api/events", { cache: "no-store" });
+  return r.json();
 }
 
-/** Procura o evento pelo PIN (juiz/coord): retorna {eventId, role} se bater */
-export async function matchPinAcrossEvents(pin: string): Promise<{eventId:string, role:"judge"|"coord"}|null> {
-  const h = await sha256(pin.trim());
-  const events = listEvents();
-  for (const e of events) {
-    const pins = loadJSON<{judgeHash:string|null;coordHash:string|null}>(`ccr-evt:${e.id}:pins`, {judgeHash:null,coordHash:null});
-    if (pins.judgeHash === h) return { eventId: e.id, role: "judge" };
-    if (pins.coordHash  === h) return { eventId: e.id, role: "coord"  };
-  }
-  return null;
+export async function createEvent(name: string): Promise<Event> {
+  const r = await fetch("/api/events", {
+    method: "POST",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({ name })
+  });
+  const j = await r.json();
+  if (!r.ok || !j?.ok) throw new Error(j?.error || "create_event_failed");
+  return j.event as Event;
 }
 
-/** Helpers de chaves por evento */
-export function keyTeams(eventId:string){ return `ccr-evt:${eventId}:teams`; }
-export function keyResults(eventId:string){ return `ccr-evt:${eventId}:results`; }
+export async function listTeams(eventId: string): Promise<{id:string; name:string}[]> {
+  const r = await fetch(`/api/events/${eventId}/teams`, { cache: "no-store" });
+  return r.json();
+}
+
+export async function addTeam(eventId: string, name: string) {
+  const r = await fetch(`/api/events/${eventId}/teams`, {
+    method: "POST",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({ name })
+  });
+  if (!r.ok) throw new Error("add_team_failed");
+}
+
+export async function renameTeam(eventId: string, oldName: string, newName: string) {
+  const r = await fetch(`/api/events/${eventId}/teams`, {
+    method: "PUT",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({ oldName, newName })
+  });
+  if (!r.ok) throw new Error("rename_team_failed");
+}
+
+export async function deleteTeam(eventId: string, name: string) {
+  const r = await fetch(`/api/events/${eventId}/teams`, {
+    method: "DELETE",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({ name })
+  });
+  if (!r.ok) throw new Error("delete_team_failed");
+}
+
+export async function clearTeamsAndRuns(eventId: string) {
+  const r = await fetch(`/api/events/${eventId}/teams`, {
+    method: "DELETE",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({})
+  });
+  if (!r.ok) throw new Error("clear_event_failed");
+}
+
+export type Run = { team: string; score: number; timeSec: number; at: number };
+
+export async function listRuns(eventId: string): Promise<Run[]> {
+  const r = await fetch(`/api/events/${eventId}/runs`, { cache: "no-store" });
+  return r.json();
+}
+
+export async function addRun(eventId: string, teamName: string, score: number, timeSec: number, notes?: string) {
+  const r = await fetch(`/api/events/${eventId}/runs`, {
+    method: "POST",
+    headers: { "content-type":"application/json" },
+    body: JSON.stringify({ teamName, score, timeSec, notes })
+  });
+  const j = await r.json().catch(()=> ({}));
+  if (!r.ok || j?.ok === false) throw new Error(j?.error || "add_run_failed");
+}
+
+export async function clearRuns(eventId: string) {
+  const r = await fetch(`/api/events/${eventId}/runs`, { method: "DELETE" });
+  if (!r.ok) throw new Error("clear_runs_failed");
+}

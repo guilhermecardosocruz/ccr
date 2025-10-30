@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { adminConfigured, getAdminPins, setupAdminPin, sha256 } from "@/lib/pin";
+import { adminConfigured, setupAdminPin, loginByPin, checkAdminPin } from "@/lib/pin";
 import { getSession, setSession } from "@/lib/session";
 import { useRouter } from "next/navigation";
-import { matchPinAcrossEvents } from "@/lib/events";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,14 +19,15 @@ export default function LoginPage() {
       else router.replace("/planilha");
       return;
     }
-    setPhase(adminConfigured() ? "login" : "setup-admin");
+    adminConfigured().then(ok=> setPhase(ok ? "login" : "setup-admin"));
   },[router]);
 
   async function onSetup(e: React.FormEvent) {
     e.preventDefault(); setErr("");
     if (!adminPin.trim()) { setErr("Informe um PIN mestre."); return; }
     await setupAdminPin(adminPin);
-    setPhase("login"); alert("PIN mestre configurado.");
+    alert("PIN mestre configurado.");
+    setPhase("login");
   }
 
   async function onLogin(e: React.FormEvent) {
@@ -35,16 +35,15 @@ export default function LoginPage() {
     const p = pin.trim(); if (!p) return;
 
     // 1) Admin?
-    const h = await sha256(p);
-    const admin = getAdminPins();
-    if (admin.adminHash && h === admin.adminHash) {
+    const isAdmin = await checkAdminPin(p);
+    if (isAdmin) {
       setSession({ authed:true, role:"admin", pin:p, eventId:null });
       router.replace("/gestor"); return;
     }
 
-    // 2) Juiz/Coord por evento
-    const match = await matchPinAcrossEvents(p);
-    if (match) {
+    // 2) Juiz/Coord (por evento)
+    const match = await loginByPin(p);
+    if (match?.ok && match.role && match.eventId) {
       setSession({ authed:true, role:match.role, pin:p, eventId: match.eventId });
       router.replace(match.role==="judge" ? "/planilha" : "/coordenacao"); return;
     }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-type Run = { team: string; score: number; timeSec: number; at: number };
+import { getSession } from "@/lib/session";
+import { listRuns } from "@/lib/events";
+import { Run, compute } from "@/lib/ranking";
 
 function mmss(total: number) {
   const m = Math.floor(total / 60);
@@ -11,14 +12,12 @@ function mmss(total: number) {
 }
 
 export default function RankingCoordenacaoPage() {
+  const sess = getSession();
+  const eventId = sess.eventId!;
   const [runs, setRuns] = useState<Run[]>([]);
 
-  useEffect(() => {
-    const raw = localStorage.getItem("ccr-results");
-    setRuns(raw ? JSON.parse(raw) : []);
-  }, []);
+  useEffect(() => { listRuns(eventId).then(setRuns); }, [eventId]);
 
-  // Agrupa por equipe
   const byTeam = useMemo(() => {
     const map = new Map<string, Run[]>();
     for (const r of runs) {
@@ -29,46 +28,7 @@ export default function RankingCoordenacaoPage() {
     return map;
   }, [runs]);
 
-  // Calcula ranking completo com 3 rodadas + desempates
-  const rows = useMemo(() => {
-    const out: Array<{
-      team: string;
-      runs: Run[];
-      rankingScore: number;
-      tieTotal: number;
-      tieTime: number;
-      pickedIdx: number[];
-    }> = [];
-
-    byTeam.forEach((arr, team) => {
-      const scores = arr.map((r) => r.score);
-      const times = arr.map((r) => r.timeSec);
-      const idx = scores.map((s, i) => i).sort((a, b) => scores[b] - scores[a]);
-
-      const picked = idx.slice(0, Math.min(2, arr.length));
-      const rankingScore = picked.reduce((acc, i) => acc + scores[i], 0);
-      const tieTotal = scores.reduce((a, b) => a + b, 0);
-      const tieTime = picked.reduce((acc, i) => acc + times[i], 0);
-
-      out.push({
-        team,
-        runs: arr,
-        rankingScore,
-        tieTotal,
-        tieTime,
-        pickedIdx: picked.sort((a, b) => a - b),
-      });
-    });
-
-    out.sort((a, b) => {
-      if (b.rankingScore !== a.rankingScore) return b.rankingScore - a.rankingScore;
-      if (b.tieTotal !== a.tieTotal) return b.tieTotal - a.tieTotal;
-      if (a.tieTime !== b.tieTime) return a.tieTime - b.tieTime;
-      return a.team.localeCompare(b.team, "pt-BR");
-    });
-
-    return out;
-  }, [byTeam]);
+  const rows = useMemo(() => compute(byTeam), [byTeam]);
 
   return (
     <main className="container-page max-w-6xl mx-auto space-y-6">
@@ -103,7 +63,7 @@ export default function RankingCoordenacaoPage() {
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-2 py-8 text-center text-gray-500">
-                    Sem rodadas salvas ainda. Volte à planilha e use “Salvar rodada (resultado)”.
+                    Sem rodadas salvas ainda.
                   </td>
                 </tr>
               ) : (
@@ -136,19 +96,6 @@ export default function RankingCoordenacaoPage() {
             </tbody>
           </table>
         </div>
-      </section>
-
-      <section className="flex items-center gap-3">
-        <button
-          className="px-3 py-2 rounded-md border"
-          onClick={() => {
-            if (!confirm("Limpar SOMENTE os resultados salvos? (não afeta equipes)")) return;
-            localStorage.removeItem("ccr-results");
-            location.reload();
-          }}
-        >
-          Limpar resultados
-        </button>
       </section>
     </main>
   );

@@ -3,8 +3,7 @@
 import RouteGuard from "@/components/RouteGuard";
 import { useEffect, useState } from "react";
 import { getSession } from "@/lib/session";
-import { keyTeams } from "@/lib/events";
-import { loadJSON, saveJSON } from "@/lib/storage";
+import { listTeams, addTeam, renameTeam, deleteTeam } from "@/lib/events";
 
 export default function Page(){
   return (
@@ -16,20 +15,35 @@ export default function Page(){
 
 function Inner(){
   const sess = getSession();
-  const TEAMS_KEY = keyTeams(sess.eventId!);
+  const eventId = sess.eventId!;
 
-  const [teams,setTeams]=useState<string[]>([]);
+  const [teams,setTeams]=useState<{id:string; name:string}[]>([]);
   const [name,setName]=useState("");
   const [edit,setEdit]=useState<number|null>(null);
   const [val,setVal]=useState("");
 
-  useEffect(()=>{ setTeams(loadJSON<string[]>(TEAMS_KEY,[])); },[TEAMS_KEY]);
-  useEffect(()=>{ saveJSON(TEAMS_KEY,teams); },[teams,TEAMS_KEY]);
+  async function refresh() {
+    const rows = await listTeams(eventId);
+    setTeams(rows);
+  }
 
-  function add(){ const n=name.trim(); if(!n||teams.includes(n)) return; setTeams([...teams,n]); setName(""); }
-  function rm(i:number){ const cp=[...teams]; cp.splice(i,1); setTeams(cp); }
-  function start(i:number){ setEdit(i); setVal(teams[i]); }
-  function save(){ if(edit===null) return; const v=val.trim(); if(!v) return; const cp=[...teams]; cp[edit]=v; setTeams(cp); setEdit(null); setVal(""); }
+  useEffect(()=>{ refresh(); },[eventId]);
+
+  async function add(){
+    const n=name.trim(); if(!n || teams.some(t=>t.name===n)) return;
+    await addTeam(eventId, n);
+    setName(""); await refresh();
+  }
+  async function rm(i:number){
+    await deleteTeam(eventId, teams[i].name);
+    await refresh();
+  }
+  function start(i:number){ setEdit(i); setVal(teams[i].name); }
+  async function save(){
+    if(edit===null) return; const v=val.trim(); if(!v) return;
+    await renameTeam(eventId, teams[edit].name, v);
+    setEdit(null); setVal(""); await refresh();
+  }
 
   return (
     <main className="container-page space-y-6">
@@ -46,8 +60,8 @@ function Inner(){
           <tbody>
             {teams.length===0 ? <tr><td colSpan={2} className="px-3 py-6 text-center text-gray-500">Nenhuma equipe.</td></tr> :
             teams.map((t,i)=>(
-              <tr key={t} className={i%2?"bg-white":"bg-gray-50/60"}>
-                <td className="px-3 py-2">{edit===i? <input value={val} onChange={e=>setVal(e.target.value)} className="border rounded-md px-2 py-1 w-full" /> : t}</td>
+              <tr key={t.id} className={i%2?"bg-white":"bg-gray-50/60"}>
+                <td className="px-3 py-2">{edit===i? <input value={val} onChange={e=>setVal(e.target.value)} className="border rounded-md px-2 py-1 w-full" /> : t.name}</td>
                 <td className="px-3 py-2 flex gap-2">{edit===i ? (<><button onClick={save} className="px-2 py-1 border rounded-md">Salvar</button><button onClick={()=>{setEdit(null);setVal("");}} className="px-2 py-1 border rounded-md">Cancelar</button></>) : (<><button onClick={()=>start(i)} className="px-2 py-1 border rounded-md">Editar</button><button onClick={()=>rm(i)} className="px-2 py-1 border rounded-md">Excluir</button></>)}</td>
               </tr>
             ))}

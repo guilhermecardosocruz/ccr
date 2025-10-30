@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  name      String
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  pins  EventPins?
+  teams Team[]
+  runs  Run[]
+
+  @@index([createdAt])
+}
+
+model EventPins {
+  eventId   String   @id
+  judgeHash String?
+  coordHash String?
+  rotatedAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  eventId   String
+  name      String
+  school    String?
+  category  String?
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  runs  Run[]
+
+  @@unique([eventId, name])
+  @@index([eventId])
+  @@index([createdAt])
+}
+
+model Run {
+  id        String   @id @default(cuid())
+  eventId   String
+  teamId    String
+  score     Decimal  @db.Decimal(10, 2)
+  timeSec   Int
+  notes     String?
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  team  Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, teamId, createdAt])
+  @@index([eventId, createdAt])
+}
+
+model AppSetting {
+  key   String @id // ex.: "admin_pin_hash"
+  value String
+}
