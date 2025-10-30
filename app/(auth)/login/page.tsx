@@ -1,88 +1,80 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { adminConfigured, setupAdminPin, loginByPin, checkAdminPin } from "@/lib/pin";
-import { getSession, setSession } from "@/lib/session";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { loginByPin } from "@/lib/pin";
+import { getSession, setSession } from "@/lib/session";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [phase, setPhase] = useState<"setup-admin"|"login">("login");
-  const [adminPin, setAdminPin] = useState("");
   const [pin, setPin] = useState("");
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(()=>{
-    const s = getSession();
-    if (s.authed && s.role) {
-      if (s.role==="admin") router.replace("/gestor");
-      else router.replace("/planilha");
-      return;
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    const p = pin.trim();
+    if (!p) { setErr("Informe o PIN."); return; }
+    setLoading(true);
+    try {
+      const res = await loginByPin(p);
+      if (!res.ok) {
+        if (res.error === "invalid_pin") setErr("PIN inválido.");
+        else setErr(res.error || "Falha no login.");
+        return;
+      }
+      // Salva sessão com o papel correto
+      const s = getSession();
+      setSession({
+        authed: true,
+        role: res.role,
+        pin: p,
+        eventId: res.eventId, // admin: null; judge/coord: eventId do evento
+      });
+
+      // Roteia conforme o papel
+      if (res.role === "admin") {
+        router.replace("/gestor");
+      } else {
+        router.replace("/planilha"); // juiz/coord
+      }
+    } catch (e) {
+      console.error("login error", e);
+      setErr("Erro ao tentar autenticar.");
+    } finally {
+      setLoading(false);
     }
-    adminConfigured().then(ok=> setPhase(ok ? "login" : "setup-admin"));
-  },[router]);
-
-  async function onSetup(e: React.FormEvent) {
-    e.preventDefault(); setErr("");
-    if (!adminPin.trim()) { setErr("Informe um PIN mestre."); return; }
-    await setupAdminPin(adminPin);
-    alert("PIN mestre configurado.");
-    setPhase("login");
-  }
-
-  async function onLogin(e: React.FormEvent) {
-    e.preventDefault(); setErr("");
-    const p = pin.trim(); if (!p) return;
-
-    // 1) Admin?
-    const isAdmin = await checkAdminPin(p);
-    if (isAdmin) {
-      setSession({ authed:true, role:"admin", pin:p, eventId:null });
-      router.replace("/gestor"); return;
-    }
-
-    // 2) Juiz/Coord (por evento)
-    const match = await loginByPin(p);
-    if (match?.ok && match.role && match.eventId) {
-      setSession({ authed:true, role:match.role, pin:p, eventId: match.eventId });
-      router.replace(match.role==="judge" ? "/planilha" : "/coordenacao"); return;
-    }
-
-    setErr("PIN inválido.");
   }
 
   return (
-    <main className="container-page">
-      <div className="max-w-md mx-auto card p-5">
-        <h1 className="text-xl font-semibold mb-4">{phase==="setup-admin" ? "Configurar PIN Mestre" : "Entrar com PIN"}</h1>
-
-        {phase==="setup-admin" ? (
-          <form onSubmit={onSetup} className="space-y-3">
-            <div>
-              <label className="block text-sm mb-1">PIN Mestre (Gestor)</label>
-              <input value={adminPin} onChange={e=>setAdminPin(e.target.value)} className="w-full border rounded-md px-3 py-2" placeholder="Defina o PIN mestre" autoFocus />
-            </div>
-            {err && <p className="text-sm text-red-600">{err}</p>}
-            <div className="flex justify-end">
-              <button className="px-3 py-2 border rounded-md bg-gray-900 text-white">Salvar PIN Mestre</button>
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={onLogin} className="space-y-3">
-            <div>
-              <label className="block text-sm mb-1">PIN</label>
-              <input value={pin} onChange={e=>setPin(e.target.value)} className="w-full border rounded-md px-3 py-2" placeholder="Digite PIN do evento ou PIN mestre" autoFocus />
-            </div>
-            {err && <p className="text-sm text-red-600">{err}</p>}
-            <div className="flex justify-end">
-              <button className="px-3 py-2 border rounded-md bg-gray-900 text-white">Entrar</button>
-            </div>
-            <div className="text-xs text-gray-500 mt-2">
-              Dica: PIN mestre leva ao Painel do Gestor; PIN de juiz/coord leva direto ao evento.
-            </div>
-          </form>
-        )}
-      </div>
-    </main>
+    <div className="min-h-[60vh] flex items-center justify-center p-4">
+      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4 border rounded-lg p-4 bg-white">
+        <div className="text-lg font-semibold">Entrar com PIN</div>
+        <div>
+          <label className="block text-sm mb-1">PIN</label>
+          <input
+            value={pin}
+            onChange={(e)=>setPin(e.target.value)}
+            className="w-full border rounded-md px-3 py-2"
+            placeholder="Digite PIN do evento ou PIN mestre"
+            autoFocus
+          />
+        </div>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-3 py-2 border rounded-md bg-gray-900 text-white disabled:opacity-60"
+          >
+            {loading ? "Entrando..." : "Entrar"}
+          </button>
+        </div>
+        <div className="text-xs text-gray-500 mt-2">
+          Dica: PIN mestre leva ao Painel do Gestor; PIN de juiz/coord leva para a planilha do evento.
+        </div>
+      </form>
+    </div>
   );
 }
