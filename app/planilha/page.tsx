@@ -36,7 +36,7 @@ const mmss = (t: number) =>
 
 export default function Page() {
   return (
-    <RouteGuard need="judge" needEvent>
+    <RouteGuard need="judge_or_coord" needEvent>
       <Planilha />
     </RouteGuard>
   );

@@ -5,7 +5,7 @@ import { getSession } from "@/lib/session";
 import { useRouter } from "next/navigation";
 
 export default function RouteGuard({ need, needEvent = false, children }:{
-  need: "any"|"admin"|"judge"|"coord",
+  need: "any"|"admin"|"judge"|"coord"|"judge_or_coord",
   needEvent?: boolean,
   children: React.ReactNode
 }) {
