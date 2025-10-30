@@ -1,12 +1,9 @@
 import prisma from "@/lib/prisma";
-import { sha256 } from "@/lib/crypto";
+import { sha256Hex } from "@/lib/crypto";
+import { normalizePin } from "@/lib/pin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function normalizePin(s: string) {
-  return String(s || "").replace(/[\s-]+/g, "").toUpperCase().trim();
-}
 
 export async function POST(req: Request) {
   try {
@@ -23,8 +20,8 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, role: "admin", eventId: null });
     }
 
-    // 2) Admin hash salvo no banco — compara como HEX
-    const hashHex = sha256(p).toString("hex");
+    // 2) Admin hash salvo no banco — compara como HEX (a partir de p normalizado)
+    const hashHex = sha256Hex(p);
     const admin = await prisma.appSetting.findUnique({ where: { key: "admin_pin_hash" } });
     if (admin?.value && admin.value === hashHex) {
       return Response.json({ ok: true, role: "admin", eventId: null });

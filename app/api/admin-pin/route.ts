@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { sha256Hex, genAlphaNum } from "@/lib/crypto";
+import { normalizePin } from "@/lib/pin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,12 +16,8 @@ export async function GET() {
 }
 
 // POST / PUT: cria ou rotaciona o PIN do admin
-export async function POST(req: Request) {
-  return handleUpsert(req);
-}
-export async function PUT(req: Request) {
-  return handleUpsert(req);
-}
+export async function POST(req: Request) { return handleUpsert(req); }
+export async function PUT(req: Request) { return handleUpsert(req); }
 
 async function handleUpsert(req: Request) {
   try {
@@ -34,16 +31,18 @@ async function handleUpsert(req: Request) {
     let adminPin: string | undefined = body.adminPin ? String(body.adminPin).trim() : undefined;
 
     if (body.rotate || !adminPin) {
-      adminPin = genAlphaNum(10);
+      adminPin = genAlphaNum(10); // já sem traços/espaços
     }
 
+    const normalized = normalizePin(adminPin!);
     await prisma.appSetting.upsert({
       where: { key: "admin_pin_hash" },
-      create: { key: "admin_pin_hash", value: sha256Hex(adminPin) },
-      update: { value: sha256Hex(adminPin) },
+      create: { key: "admin_pin_hash", value: sha256Hex(normalized) },
+      update: { value: sha256Hex(normalized) },
     });
 
-    return Response.json({ ok: true, adminPin });
+    // Sempre retornamos o PIN já normalizado (evita confusão).
+    return Response.json({ ok: true, adminPin: normalized });
   } catch (e) {
     console.error("Erro em admin-pin:", e);
     return new Response(JSON.stringify({ ok: false, error: "bad_request" }), { status: 400 });
