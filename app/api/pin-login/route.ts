@@ -1,31 +1,36 @@
 import prisma from "@/lib/prisma";
-import { sha256 } from "@/lib/crypto"; // retorna Buffer
+import { sha256 } from "@/lib/crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function normalizePin(s: string) {
+  return String(s || "").replace(/[\s-]+/g, "").toUpperCase().trim();
+}
+
 export async function POST(req: Request) {
   try {
     const { pin } = await req.json();
-    const p = String(pin ?? "").trim();
+    const raw = String(pin ?? "");
+    const p = normalizePin(raw);
     if (!p) {
       return new Response(JSON.stringify({ ok: false, error: "missing_pin" }), { status: 400 });
     }
 
-    // 1) PIN Mestre via ENV (plaintext)
-    const master = process.env.ADMIN_MASTER_PIN?.trim();
-    if (master && p === master) {
+    // 1) PIN Mestre por ENV (plaintext, normalizado)
+    const envMaster = normalizePin(process.env.ADMIN_MASTER_PIN || "");
+    if (envMaster && p === envMaster) {
       return Response.json({ ok: true, role: "admin", eventId: null });
     }
 
-    // 2) Admin hash salvo no banco (comparar como HEX)
+    // 2) Admin hash salvo no banco — compara como HEX
     const hashHex = sha256(p).toString("hex");
     const admin = await prisma.appSetting.findUnique({ where: { key: "admin_pin_hash" } });
     if (admin?.value && admin.value === hashHex) {
       return Response.json({ ok: true, role: "admin", eventId: null });
     }
 
-    // 3) PINs de evento (juiz/coord) — também com HEX
+    // 3) PINs de evento (juiz/coord) — compara como HEX
     const pinsList = await prisma.eventPins.findMany({
       select: { eventId: true, judgeHash: true, coordHash: true },
     });
