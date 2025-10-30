@@ -36,7 +36,6 @@ export default function GestorPage() {
 function GestorInner() {
   const [events, setEvents] = useState<{id:string; name:string}[]>([]);
   const [name, setName] = useState("");
-
   const [showPinsOf, setShowPinsOf] = useState<string|null>(null);
   const [plainPins, setPlainPins] = useState<{judgePin?:string; coordPin?:string}>({});
 
@@ -102,7 +101,12 @@ function GestorInner() {
       <header className="card p-4">
         <h1 className="text-lg font-semibold mb-2">Painel do Gestor</h1>
         <div className="flex gap-2">
-          <input value={name} onChange={e=>setName(e.target.value)} className="border rounded-md px-3 py-2 w-full" placeholder="Nome do evento" />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="border rounded-md px-3 py-2 w-full"
+            placeholder="Nome do evento"
+          />
           <button onClick={addEvent} className="px-3 py-2 border rounded-md">Criar evento</button>
         </div>
       </header>
@@ -118,22 +122,22 @@ function GestorInner() {
             </tr>
           </thead>
           <tbody>
-            {events.length===0 ? (
+            {events.length === 0 ? (
               <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-500">Nenhum evento.</td></tr>
-            ) : events.map((e,i)=>(
-              <tr key={e.id} className={i%2?"bg-white":"bg-gray-50/60"}>
+            ) : events.map((e, i) => (
+              <tr key={e.id} className={i % 2 ? "bg-white" : "bg-gray-50/60"}>
                 <td className="px-3 py-2">{e.name}</td>
                 <td className="px-3 py-2">••••••</td>
                 <td className="px-3 py-2">••••••••</td>
                 <td className="px-3 py-2 flex flex-wrap gap-2">
-                  <button onClick={()=>makeActive(e.id)} className="px-2 py-1 border rounded-md">Ativar evento</button>
+                  <button onClick={() => makeActive(e.id)} className="px-2 py-1 border rounded-md">Ativar evento</button>
                   <Link href="/planilha" className="px-2 py-1 border rounded-md">Planilha</Link>
                   <Link href="/equipes" className="px-2 py-1 border rounded-md">Equipes</Link>
                   <Link href="/resultado" className="px-2 py-1 border rounded-md">Resultado</Link>
                   <Link href="/coordenacao" className="px-2 py-1 border rounded-md">Coordenação</Link>
-                  <button onClick={()=>showPins(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
-                  <button onClick={()=>rotatePins(e.id)} className="px-2 py-1 border rounded-md">Rotacionar PINs</button>
-                  <button onClick={()=>resetData(e.id)} className="px-2 py-1 border rounded-md">Limpar dados</button>
+                  <button onClick={() => showPins(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
+                  <button onClick={() => rotatePins(e.id)} className="px-2 py-1 border rounded-md">Rotacionar PINs</button>
+                  <button onClick={() => resetData(e.id)} className="px-2 py-1 border rounded-md">Limpar dados</button>
                 </td>
               </tr>
             ))}
@@ -143,7 +147,7 @@ function GestorInner() {
 
       <Modal
         open={!!showPinsOf}
-        onClose={()=>setShowPinsOf(null)}
+        onClose={() => setShowPinsOf(null)}
         title="PINs do evento"
       >
         {showPinsOf && (
@@ -153,14 +157,14 @@ function GestorInner() {
                 <div className="text-sm text-gray-600">PIN Juiz</div>
                 <div className="text-xl font-semibold">{plainPins.judgePin ?? "—"}</div>
               </div>
-              {plainPins.judgePin && <button onClick={()=>copy(plainPins.judgePin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
+              {plainPins.judgePin && <button onClick={() => copy(plainPins.judgePin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
             </div>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm text-gray-600">PIN Coordenação</div>
                 <div className="text-xl font-semibold">{plainPins.coordPin ?? "—"}</div>
               </div>
-              {plainPins.coordPin && <button onClick={()=>copy(plainPins.coordPin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
+              {plainPins.coordPin && <button onClick={() => copy(plainPins.coordPin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
             </div>
             <p className="text-xs text-gray-500">Obs.: por segurança, o servidor armazena apenas hashes; ao solicitar, geramos novos PINs para exibir.</p>
           </div>
