@@ -24,6 +24,7 @@ export default function LoginPage() {
         else setErr(res.error || "Falha no login.");
         return;
       }
+
       // Salva sessão com o papel correto
       const s = getSession();
       setSession({
@@ -36,8 +37,10 @@ export default function LoginPage() {
       // Roteia conforme o papel
       if (res.role === "admin") {
         router.replace("/gestor");
-      } else {
-        router.replace("/planilha"); // juiz/coord
+      } else if (res.role === "judge") {
+        router.replace("/planilha"); // juiz
+      } else if (res.role === "coord") {
+        router.replace("/coordenacao"); // coordenação
       }
     } catch (e) {
       console.error("login error", e);

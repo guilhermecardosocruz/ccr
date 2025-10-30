@@ -21,13 +21,13 @@ export default function RouteGuard({
   useEffect(() => {
     const s = getSession();
 
-    // precisa estar logado
+    // Verifica se está logado
     if (!s.authed || !s.role) {
       router.replace("/login");
       return;
     }
 
-    // checa permissão
+    // Verifica a permissão de role
     const allowed =
       need === "any" ||
       (need === "judge_or_coord" && (s.role === "judge" || s.role === "coord")) ||
@@ -39,7 +39,7 @@ export default function RouteGuard({
       return;
     }
 
-    // precisa de evento ativo?
+    // Verifica se o evento está ativo (necessário para juiz e coordenação)
     if (needEvent && !s.eventId) {
       router.replace(s.role === "admin" ? "/gestor" : "/login");
       return;
