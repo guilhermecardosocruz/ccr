@@ -51,7 +51,7 @@ function GestorInner() {
     const n = name.trim(); if (!n) return;
     const e = await createEvent(n);
     setName(""); await refresh();
-    // gera PINs padrão (compat: cliente gera e envia)
+    // gera PINs padrão (compatibilidade legado: cliente gera e envia)
     const j = genNumeric(6), c = genAlphaNum(8);
     await setEventPins(e.id, j, c);
     setPlainPins({ judgePin: j, coordPin: c });
@@ -64,7 +64,7 @@ function GestorInner() {
     alert("Evento ativo selecionado.");
   }
 
-  // Mostrar PINs: sempre pedir novos (rotate:true) para exibir plaintext
+  // Mostrar PINs agora sempre solicita PINs novos (rotate:true) para ter plaintext
   async function showPins(id: string) {
     try {
       const res = await setEventPins(id, { rotate: true });
