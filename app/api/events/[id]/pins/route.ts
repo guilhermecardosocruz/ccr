@@ -1,38 +1,24 @@
-import { prisma } from "@/lib/db";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function sha256(text: string): Promise<string> {
-  const enc = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
-}
+import prisma from "@/lib/prisma";
+import { NextResponse } from "next/server";
 
-// GET -> { judge: boolean, coord: boolean }
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const p = await prisma.eventPins.findUnique({ where: { eventId: params.id } });
-  return new Response(JSON.stringify({
-    hasJudge: !!p?.judgeHash,
-    hasCoord: !!p?.coordHash
-  }), { headers: { "content-type": "application/json" } });
-}
-
-// PUT body: { judgePin?: string, coordPin?: string } -> define/rota
-export async function PUT(req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, ctx: any) {
   try {
-    const body = await req.json().catch(()=> ({}));
-    const data: { judgeHash?: string|null; coordHash?: string|null; rotatedAt?: Date } = { rotatedAt: new Date() };
-    if (typeof body.judgePin === "string") data.judgeHash = await sha256(body.judgePin.trim());
-    if (typeof body.coordPin  === "string") data.coordHash  = await sha256(body.coordPin.trim());
+    const id: string | undefined = ctx?.params?.id;
+    if (!id) return NextResponse.json({ ok: false, error: "missing_id" }, { status: 400 });
 
-    await prisma.eventPins.upsert({
-      where: { eventId: params.id },
-      create: { eventId: params.id, ...data },
-      update: data
+    const pins = await prisma.eventPins.findUnique({
+      where: { eventId: id },
+      select: { judgeHash: true, coordHash: true, rotatedAt: true },
     });
-    return new Response(JSON.stringify({ ok:true }), { headers: { "content-type": "application/json" } });
-  } catch {
-    return new Response(JSON.stringify({ ok:false, error: "bad_request" }), { status: 400 });
+    return NextResponse.json({ ok: true, data: pins ?? null });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "internal_error" }, { status: 500 });
   }
+}
+
+export async function HEAD(_req: Request) {
+  return new Response(null, { status: 204 });
 }
