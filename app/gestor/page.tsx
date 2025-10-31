@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { getSession, setSession } from "@/lib/session";
 import { createEvent, listEvents, clearTeamsAndRuns } from "@/lib/events";
 import { setEventPins } from "@/lib/pin";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 function genNumeric(n: number) {
@@ -18,7 +17,9 @@ function genAlphaNum(n: number) {
   return o;
 }
 
-function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title?: string; children: React.ReactNode }) {
+function Modal({ open, onClose, title, children }:{
+  open: boolean; onClose: () => void; title?: string; children: React.ReactNode;
+}) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
@@ -42,27 +43,24 @@ export default function GestorPage() {
 }
 
 function GestorInner() {
-  const [events, setEvents] = useState<{ id: string; name: string }[]>([]);
+  const [events, setEvents] = useState<{id:string; name:string}[]>([]);
   const [name, setName] = useState("");
-  const [showPinsOf, setShowPinsOf] = useState<string | null>(null);
-  const [plainPins, setPlainPins] = useState<{ judgePin?: string; coordPin?: string }>({});
+  const [showPinsOf, setShowPinsOf] = useState<string|null>(null);
+  const [plainPins, setPlainPins] = useState<{judgePin?:string; coordPin?:string}>({});
   const router = useRouter();
 
   async function refresh() {
     const rows = await listEvents();
     setEvents(rows);
   }
-
-  useEffect(() => { refresh(); }, []);
+  useEffect(()=>{ refresh(); }, []);
 
   async function addEvent() {
-    const n = name.trim();
-    if (!n) return;
+    const n = name.trim(); if (!n) return;
     const e = await createEvent(n);
     setName(""); await refresh();
+    // gera PINs iniciais
     const j = genNumeric(6), c = genAlphaNum(8);
-
-    // Definindo os PINs para o evento criado
     await setEventPins(e.id, j, c);
     setPlainPins({ judgePin: j, coordPin: c });
     setShowPinsOf(e.id);
@@ -80,28 +78,24 @@ function GestorInner() {
     alert("Dados limpos.");
   }
 
-  // Função para copiar para a área de transferência
   function copy(txt: string) {
-    navigator.clipboard.writeText(txt).then(() => alert("Copiado!"));
+    navigator.clipboard.writeText(txt).then(()=>alert("Copiado!"));
   }
 
-  // Função para exibir PINs
+  // Mostrar PINs: ROTACIONA no servidor e retorna plaintext (comportamento antigo)
   async function showPins(id: string) {
     try {
-      const res = await setEventPins(id, { rotate: false }); // Não rotacionar automaticamente
-      if (!res.ok) {
-        alert("Falha ao obter PINs: " + (res.error || "erro desconhecido"));
-        return;
-      }
+      const res = await setEventPins(id, { rotate: true });
+      if (!res.ok) { alert("Falha ao obter PINs: " + (res.error || "erro desconhecido")); return; }
       setPlainPins(res.pins || {});
       setShowPinsOf(id);
-    } catch (err) {
-      console.error("showPins error", err);
+    } catch (e) {
+      console.error(e);
       alert("Erro ao solicitar PINs.");
     }
   }
 
-  // Função para rotacionar PINs (quando o usuário apertar o botão)
+  // Modificar PINs: também rotaciona sob demanda (idêntico ao Mostrar, mas ação explícita)
   async function rotatePins(id: string) {
     const j = genNumeric(6), c = genAlphaNum(8);
     await setEventPins(id, j, c);
@@ -157,13 +151,9 @@ function GestorInner() {
         </table>
       </section>
 
-      <Modal
-        open={!!showPinsOf}
-        onClose={() => setShowPinsOf(null)}
-        title="PINs do evento"
-      >
+      <Modal open={!!showPinsOf} onClose={() => setShowPinsOf(null)} title="PINs do evento">
         {showPinsOf && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm text-gray-600">PIN Juiz</div>
@@ -178,7 +168,7 @@ function GestorInner() {
               </div>
               {plainPins.coordPin && <button onClick={() => copy(plainPins.coordPin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
             </div>
-            <p className="text-xs text-gray-500">Obs.: por segurança, o servidor armazena apenas hashes; ao solicitar, geramos novos PINs para exibir.</p>
+            <p className="text-xs text-gray-500">Obs.: cada visualização gera PINs novos (segurança).</p>
           </div>
         )}
       </Modal>
