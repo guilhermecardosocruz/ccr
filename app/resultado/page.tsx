@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getSession } from "@/lib/session";
 import { listRuns } from "@/lib/events";
 import { Run, compute } from "@/lib/ranking";
-import Link from "next/link";
+import Link from "next/link"; // Importando o Link para navegação
 
 const mmss = (t: number) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 
@@ -60,7 +60,18 @@ export default function ResultadoPage() {
         <div className="h-12 w-12 md:h-14 md:w-14 rounded-lg border flex items-center justify-center text-xs text-gray-500 bg-white">LOGO</div>
       </header>
 
-      {/* Botão para ir ao telão */}
+      {/* Botão para ir à Galeria */}
+      <section className="card p-3 md:p-5">
+        <div className="flex gap-4">
+          <Link href="/galeria">
+            <button className="px-3 py-2 border rounded-md bg-blue-500 text-white">
+              Ir para Galeria
+            </button>
+          </Link>
+        </div>
+      </section>
+
+      {/* Botão para ir ao Telão */}
       <section className="card p-3 md:p-5">
         <div className="flex gap-4">
           <Link href="/telao">
