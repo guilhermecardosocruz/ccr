@@ -23,7 +23,7 @@ function Inner(){
   const [val,setVal]=useState("");
 
   async function refresh() {
-    const rows = await listTeams(eventId);
+    const rows = await listTeams(new URLSearchParams(window.location.search).get("eventId"));
     setTeams(rows);
   }
 

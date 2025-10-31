@@ -33,7 +33,7 @@ function Planilha() {
   const [selected, setSelected] = useState("");
 
   useEffect(() => {
-    listTeams(eventId).then(setTeams);
+    listTeams(new URLSearchParams(window.location.search).get("eventId")).then(setTeams);
   }, [eventId]);
 
   const [durationMin, setDurationMin] = useState(5);
