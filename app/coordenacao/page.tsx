@@ -2,7 +2,8 @@
 
 import RouteGuard from "@/components/RouteGuard";
 import { useEffect, useMemo, useState } from "react";
-import { getSession, setSession } from "@/lib/session";  // Importando o setSession corretamente
+import { getSession, setSession } from "@/lib/session";  // Importando setSession corretamente
+import { useRouter } from "next/navigation";  // Adicionando o useRouter
 import { listTeams, listRuns } from "@/lib/events";
 import { Run as R, compute } from "@/lib/ranking";
 
@@ -17,6 +18,7 @@ export default function Page() {
 }
 
 function Inner() {
+  const router = useRouter();  // Definindo o router
   const sess = getSession();
   const eventId = sess.eventId!;
 
@@ -40,8 +42,8 @@ function Inner() {
 
   function openFor(id: string, path: string) {
     const s = getSession();
-    setSession({ ...s, eventId: id });  // Agora setSession está funcionando
-    router.push(path); // Redireciona para a URL especificada
+    setSession({ ...s, eventId: id });
+    router.push(path);  // Agora router está definido corretamente
   }
 
   return (
