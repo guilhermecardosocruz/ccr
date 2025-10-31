@@ -61,7 +61,7 @@ export default function TelaoPage(){
 
   return (
     <main className="w-full h-screen bg-white flex items-center justify-center">
-      {/* Alternar entre a exibição de imagens e placar */}
+      {/* Remover menu, título e botões da página do telão */}
       {isTelãoActive ? (
         <div className="w-full h-full flex justify-center items-center">
           {showImage ? (
