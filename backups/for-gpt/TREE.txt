@@ -22,6 +22,8 @@
 │   │   └── page.tsx
 │   ├── equipes/
 │   │   └── page.tsx
+│   ├── galeria/
+│   │   └── page.tsx
 │   ├── gestor/
 │   │   └── page.tsx
 │   ├── layout.tsx
@@ -30,13 +32,16 @@
 │   │   └── page.tsx
 │   ├── ranking-coordenacao/
 │   │   └── page.tsx
-│   └── resultado/
+│   ├── resultado/
+│   │   └── page.tsx
+│   └── telao/
 │       └── page.tsx
 ├── backups/
 │   └── for-gpt/
 │       ├── APP_CORE_DUMP.txt
 │       ├── CORE_LAYOUT_FILES.txt
 │       ├── EVENTS_PIN_API_DUMP.txt
+│       ├── GESTOR_FLOW_DEBUG.txt
 │       ├── GUARD_PIN_FLOW.txt
 │       ├── PIN_EVENT_FLOW.txt
 │       ├── PIN_FLOW_FILES.txt
@@ -80,4 +85,4 @@
 ├── tsconfig.json
 └── tsconfig.tsbuildinfo
 
-27 directories, 53 files
+29 directories, 56 files
