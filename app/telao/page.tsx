@@ -12,7 +12,12 @@ export default function TelaoPage(){
   const eventId = sess.eventId;
 
   const [runs,setRuns]=useState<Run[]>([]);
-  // carrega e atualiza a cada 5s
+  const [images, setImages] = useState<string[]>([]);
+  const [imageIndex, setImageIndex] = useState(0);
+  const [isTelãoActive, setIsTelãoActive] = useState(true); // Telão ativo
+  const [showImage, setShowImage] = useState(false);
+  const [onlyImages, setOnlyImages] = useState(false); // Controle para mostrar somente imagens
+
   useEffect(()=>{
     let stop=false;
     async function fetchNow(){
@@ -27,6 +32,15 @@ export default function TelaoPage(){
     return ()=>{ stop=true; clearInterval(id); };
   },[eventId]);
 
+  // Carregar imagens para o telão
+  useEffect(() => {
+    setImages([
+      "/images/image1.jpg",
+      "/images/image2.jpg",
+      "/images/image3.jpg",
+    ]);
+  }, []);
+
   const byTeam = useMemo(()=>{
     const m=new Map<string,Run[]>();
     for(const r of runs){ if(!m.has(r.team)) m.set(r.team,[]); m.get(r.team)!.push(r); }
@@ -35,6 +49,16 @@ export default function TelaoPage(){
   },[runs]);
 
   const rows = useMemo(()=>compute(byTeam),[byTeam]);
+
+  // Alternar entre placar e imagens a cada 10 segundos
+  useEffect(()=>{
+    const intervalId = setInterval(() => {
+      setImageIndex((prevIndex) => (prevIndex + 1) % images.length);
+      setShowImage(!showImage);
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [showImage, images.length]);
 
   return (
     <main className="container-page max-w-5xl mx-auto space-y-6">
@@ -47,37 +71,57 @@ export default function TelaoPage(){
       </header>
 
       <section className="card p-3 md:p-5">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left">
-                <th className="px-2 py-2">#</th>
-                <th className="px-2 py-2">Equipe</th>
-                <th className="px-2 py-2">Ranking (2 melhores)</th>
-                <th className="px-2 py-2">Tempo (2 melhores)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length===0 ? (
-                <tr>
-                  <td colSpan={4} className="px-2 py-8 text-center text-gray-500">
-                    Sem rodadas salvas para este evento.
-                  </td>
-                </tr>
-              ) : (
-                rows.map((r,i)=>(
-                  <tr key={r.team} className={i%2 ? "bg-white" : "bg-gray-50/60"}>
-                    <td className="px-2 py-2 font-semibold">{i+1}</td>
-                    <td className="px-2 py-2">{r.team}</td>
-                    <td className="px-2 py-2 font-semibold">{r.rankingScore.toFixed(2)}</td>
-                    <td className="px-2 py-2">{mmss(r.tieTime)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="flex gap-4 justify-between">
+          <button
+            onClick={() => setOnlyImages(!onlyImages)}
+            className="px-3 py-2 border rounded-md bg-blue-500 text-white"
+          >
+            {onlyImages ? "Mostrar Placar" : "Mostrar Imagens"}
+          </button>
         </div>
       </section>
+
+      {/* Exibição do telão */}
+      {onlyImages ? (
+        <section className="card p-3 md:p-5">
+          <div className="flex justify-center">
+            <img src={images[imageIndex]} alt={`Imagem ${imageIndex + 1}`} className="w-full h-auto" />
+          </div>
+        </section>
+      ) : (
+        <section className="card p-3 md:p-5">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left">
+                  <th className="px-2 py-2">#</th>
+                  <th className="px-2 py-2">Equipe</th>
+                  <th className="px-2 py-2">Ranking (2 melhores)</th>
+                  <th className="px-2 py-2">Tempo (2 melhores)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-2 py-8 text-center text-gray-500">
+                      Sem rodadas salvas para este evento.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((r,i)=>(
+                    <tr key={r.team} className={i%2 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-2 py-2 font-semibold">{i+1}</td>
+                      <td className="px-2 py-2">{r.team}</td>
+                      <td className="px-2 py-2 font-semibold">{r.rankingScore.toFixed(2)}</td>
+                      <td className="px-2 py-2">{mmss(r.tieTime)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </main>
   );
 }
