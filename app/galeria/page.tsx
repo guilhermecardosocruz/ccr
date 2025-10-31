@@ -1,28 +1,30 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { getSession } from "@/lib/session";
 
 export default function GaleriaPage() {
   const sess = getSession();
   const eventId = sess.eventId;
 
+  // Estado para armazenar as imagens carregadas
   const [images, setImages] = useState<string[]>([]);
-  const [newImage, setNewImage] = useState<string>("");
 
-  useEffect(() => {
-    // Carregar imagens para a galeria (aqui você pode carregar de um servidor ou banco de dados)
-    setImages([
-      "/images/image1.jpg", // Exemplo de imagens
-      "/images/image2.jpg",
-      "/images/image3.jpg",
-    ]);
-  }, [eventId]);
+  // Estado para armazenar o arquivo da imagem carregada
+  const [newImage, setNewImage] = useState<File | null>(null);
 
+  // Função para adicionar a imagem ao estado 'images'
   const addImage = () => {
     if (newImage) {
-      setImages([...images, newImage]);
-      setNewImage("");
+      // Usando FileReader para criar uma URL da imagem no navegador
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result) {
+          setImages([...images, reader.result as string]);
+        }
+      };
+      reader.readAsDataURL(newImage); // Converte o arquivo para URL
+      setNewImage(null); // Limpa o campo de seleção após a imagem ser adicionada
     }
   };
 
@@ -39,15 +41,15 @@ export default function GaleriaPage() {
       <section className="card p-3 md:p-5">
         <div className="flex gap-4">
           <input
-            type="text"
-            value={newImage}
-            onChange={(e) => setNewImage(e.target.value)}
-            placeholder="URL da imagem"
+            type="file"
+            accept="image/*"
+            onChange={(e) => e.target.files && setNewImage(e.target.files[0])}
             className="border rounded-md p-2"
           />
           <button
             onClick={addImage}
             className="px-3 py-2 border rounded-md bg-blue-500 text-white"
+            disabled={!newImage}
           >
             Adicionar Imagem
           </button>
@@ -58,7 +60,7 @@ export default function GaleriaPage() {
       <section className="card p-3 md:p-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {images.length === 0 ? (
-            <p className="text-center text-gray-500">Nenhuma imagem disponível.</p>
+            <p className="text-center text-gray-500">Nenhuma imagem disponível. Adicione imagens.</p>
           ) : (
             images.map((img, index) => (
               <div key={index} className="overflow-hidden rounded-lg shadow-lg">
