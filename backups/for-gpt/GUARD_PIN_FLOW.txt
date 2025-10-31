@@ -1,0 +1,1435 @@
+
+===== components/RouteGuard.tsx =====
+1 "use client";
+2 
+3 import { useEffect, useState } from "react";
+4 import { getSession } from "@/lib/session";
+5 import { useRouter } from "next/navigation";
+6 
+7 export default function RouteGuard({ need, needEvent = false, children }:{
+8   need: "any"|"admin"|"judge"|"coord"|"judge_or_coord",
+9   needEvent?: boolean,
+10   children: React.ReactNode
+11 }) {
+12   const router = useRouter();
+13   const [ok, setOk] = useState(false);
+14 
+15   useEffect(()=>{
+16     const s = getSession();
+17     if (!s.authed || !s.role) { router.replace("/login"); return; }
+18     if (need !== "any" && s.role !== need) {
+19       if (s.role === "admin") router.replace("/gestor"); else router.replace("/planilha");
+20       return;
+21     }
+22     if (needEvent && !s.eventId) { router.replace("/gestor"); return; }
+23     setOk(true);
+24   }, [router, need, needEvent]);
+25 
+26   if (!ok) return null;
+27   return <>{children}</>;
+28 }
+
+===== lib/session.ts =====
+1 import { loadJSON, saveJSON, removeKey } from "./storage";
+2 
+3 export type Role = "admin"|"judge"|"coord";
+4 export type Session = {
+5   authed: boolean;
+6   role: Role|null;
+7   pin: string|null;       // PIN digitado (admin ou do evento)
+8   eventId: string|null;   // evento ativo (admin pode alternar)
+9 };
+10 const KEY = "ccr-session";
+11 
+12 export function getSession(): Session {
+13   return loadJSON<Session>(KEY, { authed:false, role:null, pin:null, eventId:null });
+14 }
+15 export function setSession(s: Session) { saveJSON(KEY, s); }
+16 export function clearSession() { removeKey(KEY); }
+17 export function requireEventId(): string|null {
+18   const s = getSession(); return s.eventId;
+19 }
+
+===== lib/storage.ts =====
+1 export function loadJSON<T>(key: string, fallback: T): T {
+2   if (typeof window === "undefined") return fallback;
+3   try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; }
+4   catch { return fallback; }
+5 }
+6 export function saveJSON<T>(key: string, value: T) {
+7   if (typeof window === "undefined") return;
+8   localStorage.setItem(key, JSON.stringify(value));
+9 }
+10 export function removeKey(key: string) {
+11   if (typeof window === "undefined") return;
+12   localStorage.removeItem(key);
+13 }
+
+===== app/(auth)/login/page.tsx =====
+1 "use client";
+2 
+3 import { useState } from "react";
+4 import { useRouter } from "next/navigation";
+5 import { loginByPin } from "@/lib/pin";
+6 import { getSession, setSession } from "@/lib/session";
+7 
+8 export default function LoginPage() {
+9   const router = useRouter();
+10   const [pin, setPin] = useState("");
+11   const [err, setErr] = useState<string | null>(null);
+12   const [loading, setLoading] = useState(false);
+13 
+14   async function onSubmit(e: React.FormEvent) {
+15     e.preventDefault();
+16     setErr(null);
+17     const p = pin.trim();
+18     if (!p) { setErr("Informe o PIN."); return; }
+19     setLoading(true);
+20     try {
+21       const res = await loginByPin(p);
+22       if (!res.ok) {
+23         if (res.error === "invalid_pin") setErr("PIN inválido.");
+24         else setErr(res.error || "Falha no login.");
+25         return;
+26       }
+27       // Salva sessão com o papel correto
+28       const s = getSession();
+29       setSession({
+30         authed: true,
+31         role: res.role,
+32         pin: p,
+33         eventId: res.eventId, // admin: null; judge/coord: eventId do evento
+34       });
+35 
+36       // Roteia conforme o papel
+37       if (res.role === "admin") {
+38         router.replace("/gestor");
+39       } else {
+40         router.replace("/planilha"); // juiz/coord
+41       }
+42     } catch (e) {
+43       console.error("login error", e);
+44       setErr("Erro ao tentar autenticar.");
+45     } finally {
+46       setLoading(false);
+47     }
+48   }
+49 
+50   return (
+51     <div className="min-h-[60vh] flex items-center justify-center p-4">
+52       <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4 border rounded-lg p-4 bg-white">
+53         <div className="text-lg font-semibold">Entrar com PIN</div>
+54         <div>
+55           <label className="block text-sm mb-1">PIN</label>
+56           <input
+57             value={pin}
+58             onChange={(e)=>setPin(e.target.value)}
+59             className="w-full border rounded-md px-3 py-2"
+60             placeholder="Digite PIN do evento ou PIN mestre"
+61             autoFocus
+62           />
+63         </div>
+64         {err && <p className="text-sm text-red-600">{err}</p>}
+65         <div className="flex justify-end">
+66           <button
+67             type="submit"
+68             disabled={loading}
+69             className="px-3 py-2 border rounded-md bg-gray-900 text-white disabled:opacity-60"
+70           >
+71             {loading ? "Entrando..." : "Entrar"}
+72           </button>
+73         </div>
+74         <div className="text-xs text-gray-500 mt-2">
+75           Dica: PIN mestre leva ao Painel do Gestor; PIN de juiz/coord leva para a planilha do evento.
+76         </div>
+77       </form>
+78     </div>
+79   );
+80 }
+
+===== app/api/pin-login/route.ts =====
+1 import prisma from "@/lib/prisma";
+2 import { sha256Hex } from "@/lib/crypto";
+3 import { normalizePin } from "@/lib/pin";
+4 
+5 export const runtime = "nodejs";
+6 export const dynamic = "force-dynamic";
+7 
+8 export async function POST(req: Request) {
+9   try {
+10     const { pin } = await req.json();
+11     const raw = String(pin ?? "");
+12     const p = normalizePin(raw);
+13     if (!p) {
+14       return new Response(JSON.stringify({ ok: false, error: "missing_pin" }), { status: 400 });
+15     }
+16 
+17     // 1) PIN Mestre por ENV (plaintext, normalizado)
+18     const envMaster = normalizePin(process.env.ADMIN_MASTER_PIN || "");
+19     if (envMaster && p === envMaster) {
+20       return Response.json({ ok: true, role: "admin", eventId: null });
+21     }
+22 
+23     // 2) Admin hash salvo no banco — compara como HEX (a partir de p normalizado)
+24     const hashHex = sha256Hex(p);
+25     const admin = await prisma.appSetting.findUnique({ where: { key: "admin_pin_hash" } });
+26     if (admin?.value && admin.value === hashHex) {
+27       return Response.json({ ok: true, role: "admin", eventId: null });
+28     }
+29 
+30     // 3) PINs de evento (juiz/coord) — compara como HEX
+31     const pinsList = await prisma.eventPins.findMany({
+32       select: { eventId: true, judgeHash: true, coordHash: true },
+33     });
+34     for (const row of pinsList) {
+35       if (row.judgeHash && row.judgeHash === hashHex) {
+36         return Response.json({ ok: true, role: "judge", eventId: row.eventId });
+37       }
+38       if (row.coordHash && row.coordHash === hashHex) {
+39         return Response.json({ ok: true, role: "coord", eventId: row.eventId });
+40       }
+41     }
+42 
+43     return new Response(JSON.stringify({ ok: false, error: "invalid_pin" }), { status: 401 });
+44   } catch (e) {
+45     console.error("pin-login error:", e);
+46     return new Response(JSON.stringify({ ok: false, error: "bad_request" }), { status: 400 });
+47   }
+48 }
+
+===== lib/pin.ts =====
+1 /**
+2  * Normaliza PIN: remove espaços/traços, uppercase e trim.
+3  * Ex.: "CCR-ADM-9073" => "CCRADM9073"
+4  */
+5 export function normalizePin(s: string) {
+6   return String(s || "").replace(/[\s-]+/g, "").toUpperCase().trim();
+7 }
+8 
+9 /* =========================
+10  * Tipos compartilhados
+11  * =======================*/
+12 export type ApiOk<T=unknown> = T & { ok: true };
+13 export type ApiErr = { ok: false; error?: string };
+14 
+15 export type AdminConfiguredResp = ApiOk<{ configured: boolean; source: "env" | "db" | undefined }> | ApiErr;
+16 export type SetupAdminPinResp = ApiOk<{ adminPin: string }> | ApiErr;
+17 export type LoginResp = ApiOk<{ role: "admin" | "judge" | "coord"; eventId: string | null }> | ApiErr;
+18 
+19 export type EventPinsInfo = {
+20   ok: boolean;
+21   hasJudge?: boolean;
+22   hasCoord?: boolean;
+23   rotatedAt?: string | null;
+24   error?: string;
+25 };
+26 
+27 export type SetEventPinsBody = {
+28   rotate?: boolean;
+29   judgePin?: string;
+30   coordPin?: string;
+31 };
+32 
+33 export type SetEventPinsResp = {
+34   ok: boolean;
+35   pins?: { judgePin?: string; coordPin?: string };
+36   error?: string;
+37 };
+38 
+39 /* =========================
+40  * Admin PIN helpers (login)
+41  * =======================*/
+42 
+43 /** GET /api/admin-pin — verifica se há PIN admin configurado (env ou db) */
+44 export async function adminConfigured(): Promise<AdminConfiguredResp> {
+45   const res = await fetch("/api/admin-pin", { method: "GET", cache: "no-store" });
+46   const data = await res.json().catch(() => ({}));
+47   if (!res.ok) return { ok: false, error: data?.error || `http_${res.status}` };
+48   // data: { ok:true, configured:boolean, source:"env"|"db" }
+49   return { ok: true, configured: !!data?.configured, source: data?.source };
+50 }
+51 
+52 /** POST /api/admin-pin — define/rotaciona PIN admin no banco (se não houver ENV) */
+53 export async function setupAdminPin(pin?: string, rotate?: boolean): Promise<SetupAdminPinResp> {
+54   const body: any = {};
+55   if (rotate) body.rotate = true;
+56   if (pin) body.adminPin = normalizePin(pin);
+57 
+58   const res = await fetch("/api/admin-pin", {
+59     method: "POST",
+60     headers: { "content-type": "application/json" },
+61     cache: "no-store",
+62     body: JSON.stringify(body),
+63   });
+64   const data = await res.json().catch(() => ({}));
+65   if (!res.ok) return { ok: false, error: data?.error || `http_${res.status}` };
+66 
+67   // API retorna { ok:true, adminPin: <normalizado> }
+68   return { ok: true, adminPin: data?.adminPin };
+69 }
+70 
+71 /** POST /api/pin-login — tenta login por PIN (admin/juiz/coord) */
+72 export async function loginByPin(pin: string): Promise<LoginResp> {
+73   const res = await fetch("/api/pin-login", {
+74     method: "POST",
+75     headers: { "content-type": "application/json" },
+76     cache: "no-store",
+77     body: JSON.stringify({ pin: normalizePin(pin) }),
+78   });
+79   const data = await res.json().catch(() => ({}));
+80   if (!res.ok) return { ok: false, error: data?.error || `http_${res.status}` };
+81   return { ok: true, role: data?.role, eventId: data?.eventId ?? null };
+82 }
+83 
+84 /** Verifica se um PIN é de admin (não altera sessão) */
+85 export async function checkAdminPin(pin: string): Promise<ApiOk<{}> | ApiErr> {
+86   const r = await loginByPin(pin);
+87   if (!r.ok) return r;
+88   return r.role === "admin" ? { ok: true } : { ok: false, error: "not_admin" };
+89 }
+90 
+91 /* =========================
+92  * Event PINs helpers (gestor)
+93  * =======================*/
+94 
+95 /** GET /api/events/[id]/pins */
+96 export async function getEventPins(eventId: string): Promise<EventPinsInfo> {
+97   const url = `/api/events/${eventId}/pins`;
+98   const res = await fetch(url, { method: "GET", cache: "no-store" });
+99   const data = (await res.json().catch(() => ({}))) as EventPinsInfo;
+100   if (!res.ok) return { ok: false, error: data?.error || `http_${res.status}` };
+101   return { ok: true, hasJudge: data.hasJudge, hasCoord: data.hasCoord, rotatedAt: data.rotatedAt ?? null };
+102 }
+103 
+104 /**
+105  * POST /api/events/[id]/pins
+106  * Uso 1: setEventPins(eventId, { rotate:true })
+107  * Uso 2: setEventPins(eventId, { judgePin, coordPin })
+108  * Uso 3: setEventPins(eventId, judgePin, coordPin)  // compatibilidade legado
+109  */
+110 export async function setEventPins(eventId: string, body: SetEventPinsBody): Promise<SetEventPinsResp>;
+111 export async function setEventPins(eventId: string, judgePin: string, coordPin: string): Promise<SetEventPinsResp>;
+112 export async function setEventPins(
+113   eventId: string,
+114   arg2: SetEventPinsBody | string,
+115   arg3?: string
+116 ): Promise<SetEventPinsResp> {
+117   let payload: SetEventPinsBody;
+118   if (typeof arg2 === "string") {
+119     payload = { judgePin: normalizePin(arg2), coordPin: normalizePin(arg3 || "") };
+120   } else {
+121     payload = { ...arg2 };
+122     if (payload.judgePin) payload.judgePin = normalizePin(payload.judgePin);
+123     if (payload.coordPin) payload.coordPin = normalizePin(payload.coordPin);
+124   }
+125 
+126   const url = `/api/events/${eventId}/pins`;
+127   const res = await fetch(url, {
+128     method: "POST",
+129     headers: { "content-type": "application/json" },
+130     cache: "no-store",
+131     body: JSON.stringify(payload),
+132   });
+133   const data = (await res.json().catch(() => ({}))) as SetEventPinsResp;
+134   if (!res.ok) return { ok: false, error: data?.error || `http_${res.status}` };
+135   return { ok: true, pins: data?.pins };
+136 }
+
+===== app/planilha/page.tsx =====
+1 "use client";
+2 
+3 import RouteGuard from "@/components/RouteGuard";
+4 import { useEffect, useMemo, useState } from "react";
+5 import { getSession } from "@/lib/session";
+6 import { listTeams, addRun } from "@/lib/events";
+7 
+8 /** Constantes tipadas como literais */
+9 const MARKERS = [1, 2] as const;
+10 const ATTEMPTS = [1, 2, 3] as const;
+11 
+12 type Marker = (typeof MARKERS)[number];   // 1 | 2
+13 type Attempt = (typeof ATTEMPTS)[number]; // 1 | 2 | 3
+14 
+15 /** Config */
+16 type DKey = "lombadas" | "gap" | "obstaculo" | "intercepcao" | "chegada" | "fato";
+17 const DESAFIOS: Record<DKey, { title: string; points: number; rows: number }> = {
+18   lombadas: { title: "Lombadas (15)", points: 15, rows: 5 },
+19   gap: { title: "Gap (15)", points: 15, rows: 5 },
+20   obstaculo: { title: "Obstáculo (20)", points: 20, rows: 5 },
+21   intercepcao: { title: "Intercepção (20)", points: 20, rows: 5 },
+22   chegada: { title: "Chegada (20)", points: 20, rows: 5 },
+23   fato: { title: "Fato Histórico (50)", points: 50, rows: 5 },
+24 } as const;
+25 
+26 const MARC = { 1: 100, 2: 75, 3: 50 } as const;
+27 const MINA = { 1: 1.5, 2: 1.25, 3: 1.15 } as const;
+28 
+29 const makeState = () =>
+30   Object.fromEntries(
+31     (Object.keys(DESAFIOS) as DKey[]).map((k) => [k, Array(DESAFIOS[k].rows).fill(false)])
+32   ) as Record<DKey, boolean[]>;
+33 
+34 const mmss = (t: number) =>
+35   `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+36 
+37 export default function Page() {
+38   return (
+39     <RouteGuard need="judge_or_coord" needEvent>
+40       <Planilha />
+41     </RouteGuard>
+42   );
+43 }
+44 
+45 function Planilha() {
+46   const sess = getSession();
+47   const eventId = sess.eventId!;
+48 
+49   /** Equipes */
+50   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+51   const [selected, setSelected] = useState("");
+52   useEffect(() => {
+53     listTeams(eventId).then(setTeams);
+54   }, [eventId]);
+55 
+56   /** Cronômetro */
+57   const [durationMin, setDurationMin] = useState(5);
+58   const [timeLeft, setTimeLeft] = useState(durationMin * 60);
+59   const [running, setRunning] = useState(false);
+60   useEffect(() => {
+61     if (!running) setTimeLeft(durationMin * 60);
+62   }, [durationMin, running]);
+63   useEffect(() => {
+64     if (!running) return;
+65     const id = setInterval(() => setTimeLeft((t) => (t > 0 ? t - 1 : 0)), 1000);
+66     return () => clearInterval(id);
+67   }, [running]);
+68 
+69   const canStart = !!selected || running;
+70   const startPause = () => {
+71     if (!selected) return;
+72     if (timeLeft <= 0) setTimeLeft(durationMin * 60);
+73     setRunning((r) => !r);
+74   };
+75   const penalty = () => running && selected && setTimeLeft((t) => Math.max(0, t - 60));
+76 
+77   /** Placar */
+78   const [tab, setTab] = useState(makeState());
+79   const [mark, setMark] = useState<Record<Attempt, 0 | 1 | 2>>({ 1: 0, 2: 0, 3: 0 });
+80   const [mina, setMina] = useState<0 | Attempt>(0);
+81   const canScore = Boolean(selected) && running && timeLeft > 0;
+82 
+83   const toggle = (d: DKey, i: number) => {
+84     if (!canScore) return;
+85     setTab((p) => {
+86       const n = { ...p };
+87       n[d] = [...n[d]];
+88       n[d][i] = !n[d][i];
+89       return n;
+90     });
+91   };
+92 
+93   const pick = (t: Attempt, q: 0 | 1 | 2) => {
+94     if (!canScore) return;
+95     setMark((p) => ({ ...p, [t]: p[t] === q ? 0 : q }));
+96   };
+97 
+98   const somaCol: Record<DKey, number> = useMemo(() => {
+99     const r: Partial<Record<DKey, number>> = {};
+100     (Object.keys(DESAFIOS) as DKey[]).forEach((k) => {
+101       r[k] = tab[k].reduce((a, on) => a + (on ? DESAFIOS[k].points : 0), 0);
+102     });
+103     return r as Record<DKey, number>;
+104   }, [tab]);
+105 
+106   const somaDes = (Object.keys(DESAFIOS) as DKey[]).reduce((a, k) => a + somaCol[k], 0);
+107   const somaMar = ATTEMPTS.reduce((a, t) => a + (mark[t] ? MARC[t] : 0), 0);
+108   const mult = mina === 0 ? 1 : MINA[mina];
+109   const total = Number(((somaDes + somaMar) * mult).toFixed(2));
+110 
+111   function resetAll() {
+112     setTab(makeState());
+113     setMark({ 1: 0, 2: 0, 3: 0 });
+114     setMina(0);
+115     setRunning(false);
+116     setTimeLeft(durationMin * 60);
+117     setSelected("");
+118   }
+119 
+120   /** salvar rodada (máx 3 por equipe; salva tempo pausado) */
+121   async function saveRound() {
+122     if (!selected) {
+123       alert("Selecione uma equipe.");
+124       return;
+125     }
+126     const elapsed = durationMin * 60 - timeLeft;
+127     await addRun(eventId, selected, total, Math.max(0, elapsed));
+128     alert(
+129       `Rodada salva!\nEquipe: ${selected}\nPontuação: ${total}\nTempo: ${mmss(Math.max(0, elapsed))}`
+130     );
+131   }
+132 
+133   const cellCls = (on: boolean) =>
+134     `cell-btn ${on ? "is-on" : "is-off"} ${canScore ? "" : "opacity-50 cursor-not-allowed"}`;
+135   const maxRows = Math.max(...(Object.values(DESAFIOS).map((v) => v.rows) as number[]));
+136 
+137   return (
+138     <main className="container-page space-y-6">
+139       <header className="card p-3 md:p-5">
+140         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+141           <div className="flex items-center gap-3">
+142             <label className="text-sm text-gray-600">EQUIPE:</label>
+143             <select
+144               className="px-3 py-1.5 border rounded-md bg-white"
+145               value={selected}
+146               onChange={(e) => setSelected(e.target.value)}
+147             >
+148               <option value="">Selecione</option>
+149               {teams.map((t) => (
+150                 <option key={t.id} value={t.name}>
+151                   {t.name}
+152                 </option>
+153               ))}
+154             </select>
+155           </div>
+156 
+157           <div className="flex flex-wrap items-center gap-3">
+158             <select
+159               className="px-2 py-1.5 border rounded-md bg-white"
+160               value={durationMin}
+161               onChange={(e) => setDurationMin(Number(e.target.value))}
+162               disabled={running}
+163               title={running ? "Pause para alterar" : "Selecione a duração"}
+164             >
+165               {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((m) => (
+166                 <option key={m}>{m}</option>
+167               ))}
+168             </select>
+169             <div className="text-3xl font-mono">{mmss(timeLeft)}</div>
+170             <button
+171               onClick={startPause}
+172               className={`px-3 py-2 border rounded-md ${!canStart ? "opacity-50 cursor-not-allowed" : ""}`}
+173               disabled={!canStart}
+174             >
+175               {running ? "Pausar" : timeLeft <= 0 ? "Reiniciar" : "Iniciar"}
+176             </button>
+177             <button
+178               onClick={penalty}
+179               disabled={!running || timeLeft <= 0 || !selected}
+180               className={`px-3 py-2 border rounded-md ${
+181                 running && timeLeft > 0 && selected ? "hover:bg-gray-50" : "opacity-50 cursor-not-allowed"
+182               }`}
+183             >
+184               Penalidade -1:00
+185             </button>
+186             <button onClick={resetAll} className="px-3 py-2 border rounded-md">
+187               Zerar
+188             </button>
+189             <button onClick={saveRound} className="px-3 py-2 border rounded-md bg-gray-900 text-white">
+190               Salvar resultado
+191             </button>
+192           </div>
+193         </div>
+194         {!selected ? (
+195           <p className="mt-3 text-xs text-red-600">Selecione uma equipe para iniciar o tempo e liberar a pontuação.</p>
+196         ) : (
+197           <p className="mt-3 text-xs text-gray-500">Pontuações só podem ser marcadas com o cronômetro em andamento.</p>
+198         )}
+199       </header>
+200 
+201       {/* Desafios */}
+202       <section className="card p-3 md:p-5">
+203         <h2 className="mb-3 grid-head">DESAFIOS DE PISTA</h2>
+204         <div className="sheet">
+205           <table>
+206             <thead>
+207               <tr>
+208                 <th className="w-28"></th>
+209                 {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+210                   <th key={k}>{DESAFIOS[k].title}</th>
+211                 ))}
+212                 <th className="w-28">SOMA</th>
+213               </tr>
+214             </thead>
+215             <tbody>
+216               {Array.from({ length: maxRows }).map((_, r) => (
+217                 <tr key={r}>
+218                   <td></td>
+219                   {(Object.keys(DESAFIOS) as DKey[]).map((k) => {
+220                     const cfg = DESAFIOS[k];
+221                     const exists = r < cfg.rows;
+222                     const on = exists ? tab[k][r] : false;
+223                     return (
+224                       <td key={k + String(r)}>
+225                         {exists ? (
+226                           <button
+227                             className={cellCls(on)}
+228                             onClick={() => toggle(k, r)}
+229                             disabled={!canScore}
+230                             title={`${cfg.points} pontos`}
+231                           >
+232                             {on ? cfg.points : ""}
+233                           </button>
+234                         ) : (
+235                           <div className="cell-btn" />
+236                         )}
+237                       </td>
+238                     );
+239                   })}
+240                   <td>
+241                     <div className="cell-btn" />
+242                   </td>
+243                 </tr>
+244               ))}
+245             </tbody>
+246             <tfoot>
+247               <tr>
+248                 <th>SOMA</th>
+249                 {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+250                   <td key={"s" + k} className="summary">
+251                     {somaCol[k]}
+252                   </td>
+253                 ))}
+254                 <td className="summary">{somaDes}</td>
+255               </tr>
+256             </tfoot>
+257           </table>
+258         </div>
+259       </section>
+260 
+261       {/* Marcadores */}
+262       <section className="card p-3 md:p-5">
+263         <h2 className="mb-3 grid-head">MARCADORES</h2>
+264         <div className="sheet">
+265           <table>
+266             <thead>
+267               <tr>
+268                 <th>Marcador</th>
+269                 <th>Tentativa 1 (100)</th>
+270                 <th>Tentativa 2 (75)</th>
+271                 <th>Tentativa 3 (50)</th>
+272                 <th>SOMA</th>
+273               </tr>
+274             </thead>
+275             <tbody>
+276               {MARKERS.map((m) => (
+277                 <tr key={"m" + m}>
+278                   <td className="font-medium">{`Marcador ${m}`}</td>
+279                   {ATTEMPTS.map((t) => {
+280                     const ativo = mark[t] === m;
+281                     return (
+282                       <td key={`m${m}t${t}`}>
+283                         <button
+284                           className={`cell-btn ${ativo ? "is-on" : "is-off"} ${
+285                             canScore ? "" : "opacity-50 cursor-not-allowed"
+286                           }`}
+287                           onClick={() => pick(t, ativo ? 0 : m)}
+288                           disabled={!canScore}
+289                         >
+290                           {ativo ? MARC[t] : ""}
+291                         </button>
+292                       </td>
+293                     );
+294                   })}
+295                   <td>
+296                     <div className="cell-btn"></div>
+297                   </td>
+298                 </tr>
+299               ))}
+300             </tbody>
+301             <tfoot>
+302               <tr>
+303                 <th>SOMA</th>
+304                 <td className="summary">{mark[1] ? 100 : 0}</td>
+305                 <td className="summary">{mark[2] ? 75 : 0}</td>
+306                 <td className="summary">{mark[3] ? 50 : 0}</td>
+307                 <td className="summary">
+308                   {ATTEMPTS.reduce((a, t) => a + (mark[t] ? MARC[t] : 0), 0)}
+309                 </td>
+310               </tr>
+311             </tfoot>
+312           </table>
+313         </div>
+314       </section>
+315 
+316       {/* Mina */}
+317       <section className="card p-3 md:p-5">
+318         <h2 className="mb-3 grid-head">MINA</h2>
+319         <div className="sheet">
+320           <table>
+321             <thead>
+322               <tr>
+323                 <th>Mina</th>
+324                 <th>Tentativa 1 (1,5x)</th>
+325                 <th>Tentativa 2 (1,25x)</th>
+326                 <th>Tentativa 3 (1,15x)</th>
+327                 <th>Multiplicador</th>
+328               </tr>
+329             </thead>
+330             <tbody>
+331               <tr>
+332                 <td className="font-medium">Mina</td>
+333                 {ATTEMPTS.map((t) => {
+334                   const ativo = mina === t;
+335                   return (
+336                     <td key={`mina${t}`}>
+337                       <button
+338                         className={`cell-btn ${ativo ? "is-on" : "is-off"}`}
+339                         onClick={() => setMina(ativo ? 0 : t)}
+340                       >
+341                         {MINA[t]}
+342                       </button>
+343                     </td>
+344                   );
+345                 })}
+346                 <td className="summary">× {mult}</td>
+347               </tr>
+348             </tbody>
+349           </table>
+350         </div>
+351       </section>
+352 
+353       {/* Nota Final */}
+354       <section className="card p-3 md:p-5">
+355         <h2 className="mb-3 grid-head">Nota final (Obstáculos + Marcadores) × Mina</h2>
+356         <div className="sheet">
+357           <table>
+358             <thead>
+359               <tr>
+360                 <th>DESAFIOS DE PISTA</th>
+361                 <th>MARCADORES</th>
+362                 <th>MINA</th>
+363                 <th>RESULTADO FINAL</th>
+364               </tr>
+365             </thead>
+366             <tbody>
+367               <tr>
+368                 <td className="summary">{somaDes}</td>
+369                 <td className="summary">{somaMar}</td>
+370                 <td className="summary">{mult}</td>
+371                 <td className="summary">{total}</td>
+372               </tr>
+373             </tbody>
+374           </table>
+375         </div>
+376       </section>
+377     </main>
+378   );
+379 }
+
+===== app/coordenacao/page.tsx =====
+1 "use client";
+2 
+3 import RouteGuard from "@/components/RouteGuard";
+4 import { useEffect, useMemo, useState } from "react";
+5 import { getSession } from "@/lib/session";
+6 import { listTeams, listRuns } from "@/lib/events";
+7 import { Run as R, compute } from "@/lib/ranking";
+8 
+9 const mmss=(t:number)=>`${String(Math.floor(t/60)).padStart(2,"0")}:${String(t%60).padStart(2,"0")}`;
+10 
+11 export default function Page(){
+12   return (
+13     <RouteGuard need="coord" needEvent>
+14       <Inner />
+15     </RouteGuard>
+16   );
+17 }
+18 
+19 function Inner(){
+20   const sess = getSession();
+21   const eventId = sess.eventId!;
+22 
+23   const [teams,setTeams]=useState<{id:string; name:string}[]>([]);
+24   useEffect(()=>{ listTeams(eventId).then(setTeams); },[eventId]);
+25 
+26   const [runs,setRuns]=useState<R[]>([]);
+27   useEffect(()=>{ listRuns(eventId).then(setRuns); },[eventId]);
+28 
+29   const byTeam = useMemo(()=>{ const m=new Map<string,R[]>(); for(const r of runs){ if(!m.has(r.team)) m.set(r.team,[]); m.get(r.team)!.push(r);} for(const a of m.values()) a.sort((x,y)=>x.at-y.at); return m;},[runs]);
+30   const rows = useMemo(()=>compute(byTeam),[byTeam]);
+31 
+32   return (
+33     <main className="container-page max-w-6xl mx-auto space-y-6">
+34       <header className="flex items-center justify-between gap-4">
+35         <div>
+36           <h1 className="text-2xl md:text-3xl font-bold">Copa Criciúma de Robótica</h1>
+37           <p className="text-sm text-gray-500">Coordenação — gerenciamento de equipes e visão completa (3 rodadas).</p>
+38         </div>
+39         <div className="h-12 w-12 md:h-14 md:w-14 rounded-lg border flex items-center justify-center text-xs text-gray-500 bg-white">LOGO</div>
+40       </header>
+41 
+42       {/* lista simples de equipes */}
+43       <section className="card p-4 space-y-4">
+44         <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Equipes do evento</h2>
+45         <ul className="list-disc pl-6 text-sm">
+46           {teams.map(t=> <li key={t.id}>{t.name}</li>)}
+47         </ul>
+48       </section>
+49 
+50       {/* Ranking detalhado */}
+51       <section className="card p-3 md:p-5">
+52         <div className="overflow-x-auto">
+53           <table className="min-w-full text-sm">
+54             <thead>
+55               <tr className="text-left">
+56                 <th className="px-2 py-2">#</th>
+57                 <th className="px-2 py-2">Equipe</th>
+58                 <th className="px-2 py-2">Rod. 1</th>
+59                 <th className="px-2 py-2">Rod. 2</th>
+60                 <th className="px-2 py-2">Rod. 3</th>
+61                 <th className="px-2 py-2">Ranking</th>
+62                 <th className="px-2 py-2">Soma total</th>
+63                 <th className="px-2 py-2">Tempo (considerado)</th>
+64               </tr>
+65             </thead>
+66             <tbody>
+67               {rows.length===0 ? (
+68                 <tr><td colSpan={8} className="px-2 py-8 text-center text-gray-500">Sem rodadas salvas.</td></tr>
+69               ) : rows.map((r,i)=>{
+70                   const cells=[0,1,2].map(k=>{
+71                     const run=r.runs[k]; if(!run) return <td key={k} className="px-2 py-2 text-gray-400">—</td>;
+72                     const considered=r.pickedIdx.includes(k);
+73                     return (
+74                       <td key={k} className="px-2 py-2">
+75                         <div className={`inline-flex flex-col rounded-md border px-2 py-1 ${considered?"bg-gray-50":"opacity-80"}`}>
+76                           <span className="font-medium">{run.score.toFixed(2)}</span>
+77                           <span className="text-[11px] text-gray-500">{mmss(run.timeSec)}</span>
+78                         </div>
+79                       </td>
+80                     );
+81                   });
+82                   return (
+83                     <tr key={r.team} className={i%2?"bg-white":"bg-gray-50/60"}>
+84                       <td className="px-2 py-2 font-semibold">{i+1}</td>
+85                       <td className="px-2 py-2">{r.team}</td>
+86                       {cells}
+87                       <td className="px-2 py-2 font-semibold">{r.rankingScore.toFixed(2)}</td>
+88                       <td className="px-2 py-2">{r.tieTotal.toFixed(2)}</td>
+89                       <td className="px-2 py-2">{mmss(r.tieTime)}</td>
+90                     </tr>
+91                   );
+92                 })}
+93             </tbody>
+94           </table>
+95         </div>
+96       </section>
+97     </main>
+98   );
+99 }
+
+===== app/equipes/page.tsx =====
+1 "use client";
+2 
+3 import RouteGuard from "@/components/RouteGuard";
+4 import { useEffect, useState } from "react";
+5 import { getSession } from "@/lib/session";
+6 import { listTeams, addTeam, renameTeam, deleteTeam } from "@/lib/events";
+7 
+8 export default function Page(){
+9   return (
+10     <RouteGuard need="coord" needEvent>
+11       <Inner />
+12     </RouteGuard>
+13   );
+14 }
+15 
+16 function Inner(){
+17   const sess = getSession();
+18   const eventId = sess.eventId!;
+19 
+20   const [teams,setTeams]=useState<{id:string; name:string}[]>([]);
+21   const [name,setName]=useState("");
+22   const [edit,setEdit]=useState<number|null>(null);
+23   const [val,setVal]=useState("");
+24 
+25   async function refresh() {
+26     const rows = await listTeams(eventId);
+27     setTeams(rows);
+28   }
+29 
+30   useEffect(()=>{ refresh(); },[eventId]);
+31 
+32   async function add(){
+33     const n=name.trim(); if(!n || teams.some(t=>t.name===n)) return;
+34     await addTeam(eventId, n);
+35     setName(""); await refresh();
+36   }
+37   async function rm(i:number){
+38     await deleteTeam(eventId, teams[i].name);
+39     await refresh();
+40   }
+41   function start(i:number){ setEdit(i); setVal(teams[i].name); }
+42   async function save(){
+43     if(edit===null) return; const v=val.trim(); if(!v) return;
+44     await renameTeam(eventId, teams[edit].name, v);
+45     setEdit(null); setVal(""); await refresh();
+46   }
+47 
+48   return (
+49     <main className="container-page space-y-6">
+50       <header className="card p-4">
+51         <h1 className="text-lg font-semibold mb-2">Equipes</h1>
+52         <div className="flex gap-2">
+53           <input value={name} onChange={e=>setName(e.target.value)} className="border rounded-md px-3 py-2 w-full" placeholder="Nome da equipe" />
+54           <button onClick={add} className="px-3 py-2 border rounded-md">Adicionar</button>
+55         </div>
+56       </header>
+57       <section className="card p-0 overflow-hidden">
+58         <table className="w-full text-sm">
+59           <thead className="bg-gray-50"><tr><th className="text-left px-3 py-2">Equipe</th><th className="w-40 px-3 py-2">Ações</th></tr></thead>
+60           <tbody>
+61             {teams.length===0 ? <tr><td colSpan={2} className="px-3 py-6 text-center text-gray-500">Nenhuma equipe.</td></tr> :
+62             teams.map((t,i)=>(
+63               <tr key={t.id} className={i%2?"bg-white":"bg-gray-50/60"}>
+64                 <td className="px-3 py-2">{edit===i? <input value={val} onChange={e=>setVal(e.target.value)} className="border rounded-md px-2 py-1 w-full" /> : t.name}</td>
+65                 <td className="px-3 py-2 flex gap-2">{edit===i ? (<><button onClick={save} className="px-2 py-1 border rounded-md">Salvar</button><button onClick={()=>{setEdit(null);setVal("");}} className="px-2 py-1 border rounded-md">Cancelar</button></>) : (<><button onClick={()=>start(i)} className="px-2 py-1 border rounded-md">Editar</button><button onClick={()=>rm(i)} className="px-2 py-1 border rounded-md">Excluir</button></>)}</td>
+66               </tr>
+67             ))}
+68           </tbody>
+69         </table>
+70       </section>
+71     </main>
+72   );
+73 }
+
+===== app/resultado/page.tsx =====
+1 "use client";
+2 
+3 import { useEffect, useMemo, useState } from "react";
+4 import { getSession } from "@/lib/session";
+5 import { listRuns } from "@/lib/events";
+6 import { Run, compute } from "@/lib/ranking";
+7 
+8 const mmss=(t:number)=>`${String(Math.floor(t/60)).padStart(2,"0")}:${String(t%60).padStart(2,"0")}`;
+9 
+10 export default function ResultadoPage(){
+11   const sess = getSession();
+12   const eventId = sess.eventId;
+13   const [runs,setRuns]=useState<Run[]>([]);
+14   useEffect(()=>{ if(eventId) listRuns(eventId).then(setRuns); },[eventId]);
+15 
+16   const byTeam = useMemo(()=>{ const m=new Map<string,Run[]>(); for(const r of runs){ if(!m.has(r.team)) m.set(r.team,[]); m.get(r.team)!.push(r);} for(const a of m.values()) a.sort((x,y)=>x.at-y.at); return m;},[runs]);
+17   const rows = useMemo(()=>compute(byTeam),[byTeam]);
+18 
+19   return (
+20     <main className="container-page max-w-4xl mx-auto space-y-6">
+21       <header className="flex items-center justify-between gap-4">
+22         <div><h1 className="text-2xl md:text-3xl font-bold">Copa Criciúma de Robótica</h1><p className="text-sm text-gray-500">Ranking — 2 melhores; desempate por soma total e menor tempo.</p></div>
+23         <div className="h-12 w-12 md:h-14 md:w-14 rounded-lg border flex items-center justify-center text-xs text-gray-500 bg-white">LOGO</div>
+24       </header>
+25       <section className="card p-3 md:p-5">
+26         <div className="overflow-x-auto">
+27           <table className="min-w-full text-sm">
+28             <thead><tr className="text-left"><th className="px-2 py-2">#</th><th className="px-2 py-2">Equipe</th><th className="px-2 py-2">Ranking (2 melhores)</th><th className="px-2 py-2">Tempo (2 melhores)</th></tr></thead>
+29             <tbody>
+30               {rows.length===0 ? <tr><td colSpan={4} className="px-2 py-8 text-center text-gray-500">Sem rodadas salvas.</td></tr> :
+31                rows.map((r,i)=>(
+32                 <tr key={r.team} className={i%2?"bg-white":"bg-gray-50/60"}>
+33                   <td className="px-2 py-2 font-semibold">{i+1}</td>
+34                   <td className="px-2 py-2">{r.team}</td>
+35                   <td className="px-2 py-2 font-semibold">{r.rankingScore.toFixed(2)}</td>
+36                   <td className="px-2 py-2">{mmss(r.tieTime)}</td>
+37                 </tr>
+38                ))}
+39             </tbody>
+40           </table>
+41         </div>
+42       </section>
+43     </main>
+44   );
+45 }
+
+===== components/AppMenu.tsx =====
+1 "use client";
+2 
+3 import Link from "next/link";
+4 import { useEffect, useState } from "react";
+5 import { clearSession, getSession } from "@/lib/session";
+6 import { useRouter } from "next/navigation";
+7 import { listEvents } from "@/lib/events";
+8 
+9 export default function AppMenu() {
+10   const router = useRouter();
+11   const [ready, setReady] = useState(false);
+12   const [authed, setAuthed] = useState(false);
+13   const [role, setRole] = useState<"admin" | "judge" | "coord" | null>(null);
+14   const [eventId, setEventId] = useState<string | null>(null);
+15   const [eventName, setEventName] = useState<string>("");
+16 
+17   useEffect(() => {
+18     const s = getSession();
+19     setAuthed(!!s.authed && !!s.role);
+20     setRole(s.role);
+21     setEventId(s.eventId);
+22     setReady(true);
+23 
+24     async function loadEvent() {
+25       if (s.eventId) {
+26         try {
+27           const events = await listEvents();
+28           const ev = events.find((e) => e.id === s.eventId);
+29           setEventName(ev?.name || "");
+30         } catch (err) {
+31           console.error("Erro ao carregar eventos:", err);
+32         }
+33       }
+34     }
+35     loadEvent();
+36   }, []);
+37 
+38   function onLogout() {
+39     clearSession();
+40     router.replace("/login");
+41   }
+42 
+43   return (
+44     <nav className="w-full border-b bg-white">
+45       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+46         <div className="font-semibold">CCR • Placar</div>
+47 
+48         {!ready ? (
+49           <div className="h-6 w-40 rounded bg-gray-200 animate-pulse" />
+50         ) : (
+51           <div className="flex items-center gap-4 text-sm">
+52             {authed ? (
+53               <>
+54                 {role === "admin" ? (
+55                   <>
+56                     <Link href="/gestor" className="hover:underline">Gestor</Link>
+57                     {!!eventId && (
+58                       <>
+59                         <span className="text-gray-500 truncate max-w-[14rem]" title={eventName || eventId}>
+60                           Evento: {eventName || eventId}
+61                         </span>
+62                         <Link href="/planilha" className="hover:underline">Planilha</Link>
+63                         <Link href="/equipes" className="hover:underline">Equipes</Link>
+64                         <Link href="/resultado" className="hover:underline">Resultado</Link>
+65                         <Link href="/coordenacao" className="hover:underline">Coordenação</Link>
+66                       </>
+67                     )}
+68                   </>
+69                 ) : (
+70                   <>
+71                     <Link href="/planilha" className="hover:underline">Planilha</Link>
+72                     <Link href="/equipes" className="hover:underline">Equipes</Link>
+73                     <Link href="/resultado" className="hover:underline">Resultado</Link>
+74                     <Link href="/coordenacao" className="hover:underline">Coordenação</Link>
+75                   </>
+76                 )}
+77 
+78                 {/* Sair: somente quando logado */}
+79                 <button
+80                   onClick={onLogout}
+81                   className="px-2 py-1 border rounded-md"
+82                   title="Encerrar sessão"
+83                 >
+84                   Sair
+85                 </button>
+86               </>
+87             ) : (
+88               // Não logado: sem botão Sair, só o atalho de Login
+89               <Link href="/login" className="hover:underline">Login</Link>
+90             )}
+91           </div>
+92         )}
+93       </div>
+94     </nav>
+95   );
+96 }
+
+===== app/layout.tsx =====
+1 export const metadata = { title: "CCR • Placar", description: "Planilha interativa de pontuação" };
+2 import "./../styles/globals.css";
+3 import AppMenu from "@/components/AppMenu";
+4 
+5 export default function RootLayout({ children }: { children: React.ReactNode }) {
+6   return (
+7     <html lang="pt-BR">
+8       <body>
+9         <AppMenu />
+10         {children}
+11       </body>
+12     </html>
+13   );
+14 }
+
+===== app/(auth)/layout.tsx =====
+1 import "@/styles/globals.css";
+2 import AppMenu from "@/components/AppMenu";
+3 
+4 export const metadata = {
+5   title: "CCR • Login",
+6   description: "Login do painel CCR",
+7 };
+8 
+9 export default function AuthLayout({ children }: { children: React.ReactNode }) {
+10   return (
+11     <html lang="pt-BR">
+12       <body className="bg-gray-50 min-h-screen flex flex-col">
+13         <AppMenu />
+14         <main className="flex-1 flex items-center justify-center">{children}</main>
+15       </body>
+16     </html>
+17   );
+18 }
+
+===== app/gestor/page.tsx =====
+1 "use client";
+2 
+3 import RouteGuard from "@/components/RouteGuard";
+4 import { useEffect, useState } from "react";
+5 import { getSession, setSession } from "@/lib/session";
+6 import Link from "next/link";
+7 import { createEvent, listEvents, clearTeamsAndRuns } from "@/lib/events";
+8 import { setEventPins } from "@/lib/pin";
+9 
+10 function genNumeric(n:number){ return Array.from({length:n},()=>Math.floor(Math.random()*10)).join(""); }
+11 function genAlphaNum(n:number){ const cs="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let o=""; for(let i=0;i<n;i++) o+=cs[Math.floor(Math.random()*cs.length)]; return o; }
+12 
+13 function Modal({open,onClose,title,children}:{open:boolean;onClose:()=>void;title?:string;children:React.ReactNode}) {
+14   if(!open) return null;
+15   return (
+16     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+17       <div className="bg-white rounded-xl shadow-xl border w-full max-w-md p-5">
+18         <div className="flex items-center justify-between mb-3">
+19           <h3 className="text-lg font-semibold">{title}</h3>
+20           <button onClick={onClose} className="px-2 py-1 border rounded-md">Fechar</button>
+21         </div>
+22         {children}
+23       </div>
+24     </div>
+25   );
+26 }
+27 
+28 export default function GestorPage() {
+29   return (
+30     <RouteGuard need="admin">
+31       <GestorInner />
+32     </RouteGuard>
+33   );
+34 }
+35 
+36 function GestorInner() {
+37   const [events, setEvents] = useState<{id:string; name:string}[]>([]);
+38   const [name, setName] = useState("");
+39 
+40   const [showPinsOf, setShowPinsOf] = useState<string|null>(null);
+41   const [plainPins, setPlainPins] = useState<{judgePin?:string; coordPin?:string}>({});
+42 
+43   async function refresh() {
+44     const rows = await listEvents();
+45     setEvents(rows);
+46   }
+47 
+48   useEffect(()=>{ refresh(); }, []);
+49 
+50   async function addEvent() {
+51     const n = name.trim(); if (!n) return;
+52     const e = await createEvent(n);
+53     setName(""); await refresh();
+54     // gera PINs padrão (compatibilidade legado: cliente gera e envia)
+55     const j = genNumeric(6), c = genAlphaNum(8);
+56     await setEventPins(e.id, j, c);
+57     setPlainPins({ judgePin: j, coordPin: c });
+58     setShowPinsOf(e.id);
+59   }
+60 
+61   function makeActive(id: string) {
+62     const s = getSession();
+63     setSession({ ...s, eventId: id });
+64     alert("Evento ativo selecionado.");
+65   }
+66 
+67   // Mostrar PINs agora sempre solicita PINs novos (rotate:true) para ter plaintext
+68   async function showPins(id: string) {
+69     try {
+70       const res = await setEventPins(id, { rotate: true });
+71       if (!res.ok) {
+72         alert("Falha ao obter PINs: " + (res.error || "erro desconhecido"));
+73         return;
+74       }
+75       setPlainPins(res.pins || {});
+76       setShowPinsOf(id);
+77     } catch (err) {
+78       console.error("showPins error", err);
+79       alert("Erro ao solicitar PINs.");
+80     }
+81   }
+82 
+83   async function rotatePins(id: string) {
+84     const j = genNumeric(6), c = genAlphaNum(8);
+85     await setEventPins(id, j, c);
+86     setPlainPins({ judgePin: j, coordPin: c });
+87     setShowPinsOf(id);
+88   }
+89 
+90   async function resetData(id: string) {
+91     if (!confirm("Limpar equipes e resultados deste evento?")) return;
+92     await clearTeamsAndRuns(id);
+93     alert("Dados limpos.");
+94   }
+95 
+96   function copy(txt: string) {
+97     navigator.clipboard.writeText(txt).then(()=>alert("Copiado!"));
+98   }
+99 
+100   return (
+101     <main className="container-page space-y-6">
+102       <header className="card p-4">
+103         <h1 className="text-lg font-semibold mb-2">Painel do Gestor</h1>
+104         <div className="flex gap-2">
+105           <input value={name} onChange={e=>setName(e.target.value)} className="border rounded-md px-3 py-2 w-full" placeholder="Nome do evento" />
+106           <button onClick={addEvent} className="px-3 py-2 border rounded-md">Criar evento</button>
+107         </div>
+108       </header>
+109 
+110       <section className="card p-0 overflow-hidden">
+111         <table className="w-full text-sm">
+112           <thead className="bg-gray-50">
+113             <tr>
+114               <th className="text-left px-3 py-2">Evento</th>
+115               <th className="px-3 py-2">PIN Juiz</th>
+116               <th className="px-3 py-2">PIN Coord</th>
+117               <th className="px-3 py-2">Ações</th>
+118             </tr>
+119           </thead>
+120           <tbody>
+121             {events.length===0 ? (
+122               <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-500">Nenhum evento.</td></tr>
+123             ) : events.map((e,i)=>(
+124               <tr key={e.id} className={i%2?"bg-white":"bg-gray-50/60"}>
+125                 <td className="px-3 py-2">{e.name}</td>
+126                 <td className="px-3 py-2">••••••</td>
+127                 <td className="px-3 py-2">••••••••</td>
+128                 <td className="px-3 py-2 flex flex-wrap gap-2">
+129                   <button onClick={()=>makeActive(e.id)} className="px-2 py-1 border rounded-md">Ativar evento</button>
+130                   <Link href="/planilha" className="px-2 py-1 border rounded-md">Planilha</Link>
+131                   <Link href="/equipes" className="px-2 py-1 border rounded-md">Equipes</Link>
+132                   <Link href="/resultado" className="px-2 py-1 border rounded-md">Resultado</Link>
+133                   <Link href="/coordenacao" className="px-2 py-1 border rounded-md">Coordenação</Link>
+134                   <button onClick={()=>showPins(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
+135                   <button onClick={()=>rotatePins(e.id)} className="px-2 py-1 border rounded-md">Rotacionar PINs</button>
+136                   <button onClick={()=>resetData(e.id)} className="px-2 py-1 border rounded-md">Limpar dados</button>
+137                 </td>
+138               </tr>
+139             ))}
+140           </tbody>
+141         </table>
+142       </section>
+143 
+144       <Modal
+145         open={!!showPinsOf}
+146         onClose={()=>setShowPinsOf(null)}
+147         title="PINs do evento"
+148       >
+149         {showPinsOf && (
+150           <div className="space-y-3">
+151             <div className="flex items-center justify-between gap-3">
+152               <div>
+153                 <div className="text-sm text-gray-600">PIN Juiz</div>
+154                 <div className="text-xl font-semibold">{plainPins.judgePin ?? "—"}</div>
+155               </div>
+156               {plainPins.judgePin && <button onClick={()=>copy(plainPins.judgePin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
+157             </div>
+158             <div className="flex items-center justify-between gap-3">
+159               <div>
+160                 <div className="text-sm text-gray-600">PIN Coordenação</div>
+161                 <div className="text-xl font-semibold">{plainPins.coordPin ?? "—"}</div>
+162               </div>
+163               {plainPins.coordPin && <button onClick={()=>copy(plainPins.coordPin!)} className="px-2 py-1 border rounded-md">Copiar</button>}
+164             </div>
+165             <p className="text-xs text-gray-500">Obs.: por segurança, o servidor armazena apenas hashes; ao solicitar, geramos novos PINs para exibir.</p>
+166           </div>
+167         )}
+168       </Modal>
+169     </main>
+170   );
+171 }
+
+===== app/api/events/[id]/pins/route.ts =====
+1 import prisma from "@/lib/prisma";
+2 import { sha256Hex, genAlphaNum, genNumeric } from "@/lib/crypto";
+3 
+4 export const runtime = "nodejs";
+5 export const dynamic = "force-dynamic";
+6 
+7 // GET: retorna apenas que existem (não expõe plaintext)
+8 export async function GET(_req: Request, ctx: any) {
+9   const id: string | undefined = ctx?.params?.id;
+10   if (!id) return new Response(JSON.stringify({ ok: false, error: "missing_id" }), { status: 400 });
+11   const pins = await prisma.eventPins.findUnique({ where: { eventId: id } });
+12   const hasJudge = Boolean(pins?.judgeHash);
+13   const hasCoord = Boolean(pins?.coordHash);
+14   return Response.json({ ok: true, hasJudge, hasCoord, rotatedAt: pins?.rotatedAt ?? null });
+15 }
+16 
+17 /**
+18  * POST: rotaciona ou define PINs
+19  * body:
+20  *  - rotate: boolean (se true, gera novos aleatórios)
+21  *  - judgePin?: string  (opcional — define manual)
+22  *  - coordPin?: string  (opcional — define manual)
+23  * Retorna sempre os PINs em texto APENAS nessa resposta (para copiar).
+24  */
+25 export async function POST(req: Request, ctx: any) {
+26   try {
+27     const id: string | undefined = ctx?.params?.id;
+28     if (!id) return new Response(JSON.stringify({ ok: false, error: "missing_id" }), { status: 400 });
+29 
+30     const body = await req.json().catch(() => ({}));
+31     let judgePin: string | undefined = body.judgePin ? String(body.judgePin).trim() : undefined;
+32     let coordPin: string | undefined = body.coordPin ? String(body.coordPin).trim() : undefined;
+33 
+34     if (body.rotate) {
+35       judgePin = genNumeric(6);
+36       coordPin = genAlphaNum(8);
+37     }
+38     if (!judgePin && !coordPin) {
+39       return new Response(JSON.stringify({ ok: false, error: "nothing_to_set" }), { status: 400 });
+40     }
+41 
+42     await prisma.eventPins.upsert({
+43       where: { eventId: id },
+44       create: {
+45         eventId: id,
+46         judgeHash: judgePin ? sha256Hex(judgePin) : null,
+47         coordHash: coordPin ? sha256Hex(coordPin) : null,
+48       },
+49       update: {
+50         judgeHash: judgePin ? sha256Hex(judgePin) : undefined,
+51         coordHash: coordPin ? sha256Hex(coordPin) : undefined,
+52         rotatedAt: new Date(),
+53       },
+54     });
+55 
+56     return Response.json({ ok: true, pins: { judgePin, coordPin } });
+57   } catch {
+58     return new Response(JSON.stringify({ ok: false, error: "bad_request" }), { status: 400 });
+59   }
+60 }
+
+===== app/api/events/route.ts =====
+1 import prisma from "@/lib/prisma";
+2 import { sha256Hex, genNumeric, genAlphaNum } from "@/lib/crypto";
+3 
+4 export const runtime = "nodejs";
+5 export const dynamic = "force-dynamic";
+6 
+7 // GET: lista eventos (id, name)
+8 export async function GET() {
+9   const rows = await prisma.event.findMany({
+10     select: { id: true, name: true, createdAt: true, archived: true },
+11     orderBy: { createdAt: "desc" },
+12   });
+13   return Response.json(rows);
+14 }
+15 
+16 // POST: cria evento e já gera PINs padrão (retorna PINs em texto apenas nessa resposta)
+17 export async function POST(req: Request) {
+18   try {
+19     const { name } = await req.json();
+20     const n = String(name ?? "").trim();
+21     if (!n) return new Response(JSON.stringify({ ok: false, error: "invalid_name" }), { status: 400 });
+22 
+23     const ev = await prisma.event.create({ data: { name: n } });
+24 
+25     // Gera PINs iniciais
+26     const judgePin = genNumeric(6);
+27     const coordPin = genAlphaNum(8);
+28     await prisma.eventPins.create({
+29       data: {
+30         eventId: ev.id,
+31         judgeHash: sha256Hex(judgePin),
+32         coordHash: sha256Hex(coordPin),
+33       },
+34     });
+35 
+36     return Response.json({ ok: true, event: { id: ev.id, name: ev.name }, pins: { judgePin, coordPin } });
+37   } catch {
+38     return new Response(JSON.stringify({ ok: false, error: "bad_request" }), { status: 400 });
+39   }
+40 }
+
+===== lib/events.ts =====
+1 export type Event = { id: string; name: string; createdAt: string; archived: boolean };
+2 
+3 export async function listEvents(): Promise<Event[]> {
+4   const r = await fetch("/api/events", { cache: "no-store" });
+5   return r.json();
+6 }
+7 
+8 export async function createEvent(name: string): Promise<Event> {
+9   const r = await fetch("/api/events", {
+10     method: "POST",
+11     headers: { "content-type":"application/json" },
+12     body: JSON.stringify({ name })
+13   });
+14   const j = await r.json();
+15   if (!r.ok || !j?.ok) throw new Error(j?.error || "create_event_failed");
+16   return j.event as Event;
+17 }
+18 
+19 export async function listTeams(eventId: string): Promise<{id:string; name:string}[]> {
+20   const r = await fetch(`/api/events/${eventId}/teams`, { cache: "no-store" });
+21   return r.json();
+22 }
+23 
+24 export async function addTeam(eventId: string, name: string) {
+25   const r = await fetch(`/api/events/${eventId}/teams`, {
+26     method: "POST",
+27     headers: { "content-type":"application/json" },
+28     body: JSON.stringify({ name })
+29   });
+30   if (!r.ok) throw new Error("add_team_failed");
+31 }
+32 
+33 export async function renameTeam(eventId: string, oldName: string, newName: string) {
+34   const r = await fetch(`/api/events/${eventId}/teams`, {
+35     method: "PUT",
+36     headers: { "content-type":"application/json" },
+37     body: JSON.stringify({ oldName, newName })
+38   });
+39   if (!r.ok) throw new Error("rename_team_failed");
+40 }
+41 
+42 export async function deleteTeam(eventId: string, name: string) {
+43   const r = await fetch(`/api/events/${eventId}/teams`, {
+44     method: "DELETE",
+45     headers: { "content-type":"application/json" },
+46     body: JSON.stringify({ name })
+47   });
+48   if (!r.ok) throw new Error("delete_team_failed");
+49 }
+50 
+51 export async function clearTeamsAndRuns(eventId: string) {
+52   const r = await fetch(`/api/events/${eventId}/teams`, {
+53     method: "DELETE",
+54     headers: { "content-type":"application/json" },
+55     body: JSON.stringify({})
+56   });
+57   if (!r.ok) throw new Error("clear_event_failed");
+58 }
+59 
+60 export type Run = { team: string; score: number; timeSec: number; at: number };
+61 
+62 export async function listRuns(eventId: string): Promise<Run[]> {
+63   const r = await fetch(`/api/events/${eventId}/runs`, { cache: "no-store" });
+64   const data = await r.json();
+65   // API já retorna Run[]; garantimos types coerentes:
+66   return (Array.isArray(data) ? data : []) as Run[];
+67 }
+68 
+69 export async function addRun(eventId: string, teamName: string, score: number, timeSec: number, notes?: string) {
+70   const r = await fetch(`/api/events/${eventId}/runs`, {
+71     method: "POST",
+72     headers: { "content-type":"application/json" },
+73     body: JSON.stringify({ teamName, score, timeSec, notes })
+74   });
+75   const j = await r.json().catch(()=> ({}));
+76   if (!r.ok || j?.ok === false) throw new Error(j?.error || "add_run_failed");
+77 }
+78 
+79 export async function clearRuns(eventId: string) {
+80   const r = await fetch(`/api/events/${eventId}/runs`, { method: "DELETE" });
+81   if (!r.ok) throw new Error("clear_runs_failed");
+82 }

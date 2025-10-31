@@ -1,0 +1,779 @@
+
+===== components/RouteGuard.tsx =====
+1 "use client";
+2 
+3 import { useEffect, useState } from "react";
+4 import { getSession } from "@/lib/session";
+5 import { useRouter } from "next/navigation";
+6 
+7 export default function RouteGuard({ need, needEvent = false, children }:{
+8   need: "any"|"admin"|"judge"|"coord"|"judge_or_coord",
+9   needEvent?: boolean,
+10   children: React.ReactNode
+11 }) {
+12   const router = useRouter();
+13   const [ok, setOk] = useState(false);
+14 
+15   useEffect(()=>{
+16     const s = getSession();
+17     if (!s.authed || !s.role) {
+18       router.replace("/login");
+19       return;
+20     }
+21 
+22     // Redirecionamento para o Gestor caso não tenha permissão
+23     if (need !== "any" && s.role !== need) {
+24       if (s.role === "admin") {
+25         router.replace("/gestor");
+26       } else if (s.role === "judge" || s.role === "coord") {
+27         router.replace("/planilha"); // Redireciona para planilha se for juiz ou coordenador
+28       }
+29       return;
+30     }
+31 
+32     // Verificação de evento
+33     if (needEvent && !s.eventId) {
+34       router.replace("/gestor");
+35       return;
+36     }
+37 
+38     setOk(true);
+39   }, [router, need, needEvent]);
+40 
+41   if (!ok) return null;
+42   return <>{children}</>;
+43 }
+
+===== app/(auth)/login/page.tsx =====
+1 "use client";
+2 
+3 import { useState } from "react";
+4 import { useRouter } from "next/navigation";
+5 import { loginByPin } from "@/lib/pin";
+6 import { getSession, setSession } from "@/lib/session";
+7 
+8 export default function LoginPage() {
+9   const router = useRouter();
+10   const [pin, setPin] = useState("");
+11   const [err, setErr] = useState<string | null>(null);
+12   const [loading, setLoading] = useState(false);
+13 
+14   async function onSubmit(e: React.FormEvent) {
+15     e.preventDefault();
+16     setErr(null);
+17     const p = pin.trim();
+18     if (!p) { setErr("Informe o PIN."); return; }
+19     setLoading(true);
+20     try {
+21       const res = await loginByPin(p);
+22       if (!res.ok) {
+23         if (res.error === "invalid_pin") setErr("PIN inválido.");
+24         else setErr(res.error || "Falha no login.");
+25         return;
+26       }
+27 
+28       // Salva sessão com o papel correto
+29       const s = getSession();
+30       setSession({
+31         authed: true,
+32         role: res.role,
+33         pin: p,
+34         eventId: res.eventId, // admin: null; judge/coord: eventId do evento
+35       });
+36 
+37       // Roteia conforme o papel
+38       if (res.role === "admin") {
+39         router.replace("/gestor");
+40       } else if (res.role === "judge") {
+41         router.replace("/planilha"); // juiz
+42       } else if (res.role === "coord") {
+43         router.replace("/coordenacao"); // coordenação
+44       }
+45     } catch (e) {
+46       console.error("login error", e);
+47       setErr("Erro ao tentar autenticar.");
+48     } finally {
+49       setLoading(false);
+50     }
+51   }
+52 
+53   return (
+54     <div className="min-h-[60vh] flex items-center justify-center p-4">
+55       <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4 border rounded-lg p-4 bg-white">
+56         <div className="text-lg font-semibold">Entrar com PIN</div>
+57         <div>
+58           <label className="block text-sm mb-1">PIN</label>
+59           <input
+60             value={pin}
+61             onChange={(e)=>setPin(e.target.value)}
+62             className="w-full border rounded-md px-3 py-2"
+63             placeholder="Digite PIN do evento ou PIN mestre"
+64             autoFocus
+65           />
+66         </div>
+67         {err && <p className="text-sm text-red-600">{err}</p>}
+68         <div className="flex justify-end">
+69           <button
+70             type="submit"
+71             disabled={loading}
+72             className="px-3 py-2 border rounded-md bg-gray-900 text-white disabled:opacity-60"
+73           >
+74             {loading ? "Entrando..." : "Entrar"}
+75           </button>
+76         </div>
+77         <div className="text-xs text-gray-500 mt-2">
+78           Dica: PIN mestre leva ao Painel do Gestor; PIN de juiz/coord leva para a planilha do evento.
+79         </div>
+80       </form>
+81     </div>
+82   );
+83 }
+
+===== lib/session.ts =====
+1 import { loadJSON, saveJSON, removeKey } from "./storage";
+2 
+3 export type Role = "admin"|"judge"|"coord";
+4 export type Session = {
+5   authed: boolean;
+6   role: Role|null;
+7   pin: string|null;       // PIN digitado (admin ou do evento)
+8   eventId: string|null;   // evento ativo (admin pode alternar)
+9 };
+10 const KEY = "ccr-session";
+11 
+12 export function getSession(): Session {
+13   return loadJSON<Session>(KEY, { authed:false, role:null, pin:null, eventId:null });
+14 }
+15 export function setSession(s: Session) { saveJSON(KEY, s); }
+16 export function clearSession() { removeKey(KEY); }
+17 export function requireEventId(): string|null {
+18   const s = getSession(); return s.eventId;
+19 }
+
+===== app/api/pin-login/route.ts =====
+1 import prisma from "@/lib/prisma";
+2 import { sha256Hex } from "@/lib/crypto";
+3 import { normalizePin } from "@/lib/pin";
+4 
+5 export const runtime = "nodejs";
+6 export const dynamic = "force-dynamic";
+7 
+8 export async function POST(req: Request) {
+9   try {
+10     const { pin } = await req.json();
+11     const raw = String(pin ?? "");
+12     const p = normalizePin(raw);
+13     if (!p) {
+14       return new Response(JSON.stringify({ ok: false, error: "missing_pin" }), { status: 400 });
+15     }
+16 
+17     // 1) PIN Mestre por ENV (plaintext, normalizado)
+18     const envMaster = normalizePin(process.env.ADMIN_MASTER_PIN || "");
+19     if (envMaster && p === envMaster) {
+20       return Response.json({ ok: true, role: "admin", eventId: null });
+21     }
+22 
+23     // 2) Admin hash salvo no banco — compara como HEX (a partir de p normalizado)
+24     const hashHex = sha256Hex(p);
+25     const admin = await prisma.appSetting.findUnique({ where: { key: "admin_pin_hash" } });
+26     if (admin?.value && admin.value === hashHex) {
+27       return Response.json({ ok: true, role: "admin", eventId: null });
+28     }
+29 
+30     // 3) PINs de evento (juiz/coord) — compara como HEX
+31     const pinsList = await prisma.eventPins.findMany({
+32       select: { eventId: true, judgeHash: true, coordHash: true },
+33     });
+34     for (const row of pinsList) {
+35       if (row.judgeHash && row.judgeHash === hashHex) {
+36         return Response.json({ ok: true, role: "judge", eventId: row.eventId });
+37       }
+38       if (row.coordHash && row.coordHash === hashHex) {
+39         return Response.json({ ok: true, role: "coord", eventId: row.eventId });
+40       }
+41     }
+42 
+43     return new Response(JSON.stringify({ ok: false, error: "invalid_pin" }), { status: 401 });
+44   } catch (e) {
+45     console.error("pin-login error:", e);
+46     return new Response(JSON.stringify({ ok: false, error: "bad_request" }), { status: 400 });
+47   }
+48 }
+
+===== app/planilha/page.tsx =====
+1 "use client";
+2 
+3 import RouteGuard from "@/components/RouteGuard";
+4 import { useEffect, useMemo, useState } from "react";
+5 import { getSession } from "@/lib/session";
+6 import { listTeams, addRun } from "@/lib/events";
+7 
+8 /** Constantes tipadas como literais */
+9 const MARKERS = [1, 2] as const;
+10 const ATTEMPTS = [1, 2, 3] as const;
+11 
+12 type Marker = (typeof MARKERS)[number];   // 1 | 2
+13 type Attempt = (typeof ATTEMPTS)[number]; // 1 | 2 | 3
+14 
+15 /** Config */
+16 type DKey = "lombadas" | "gap" | "obstaculo" | "intercepcao" | "chegada" | "fato";
+17 const DESAFIOS: Record<DKey, { title: string; points: number; rows: number }> = {
+18   lombadas: { title: "Lombadas (15)", points: 15, rows: 5 },
+19   gap: { title: "Gap (15)", points: 15, rows: 5 },
+20   obstaculo: { title: "Obstáculo (20)", points: 20, rows: 5 },
+21   intercepcao: { title: "Intercepção (20)", points: 20, rows: 5 },
+22   chegada: { title: "Chegada (20)", points: 20, rows: 5 },
+23   fato: { title: "Fato Histórico (50)", points: 50, rows: 5 },
+24 } as const;
+25 
+26 const MARC = { 1: 100, 2: 75, 3: 50 } as const;
+27 const MINA = { 1: 1.5, 2: 1.25, 3: 1.15 } as const;
+28 
+29 const makeState = () =>
+30   Object.fromEntries(
+31     (Object.keys(DESAFIOS) as DKey[]).map((k) => [k, Array(DESAFIOS[k].rows).fill(false)])
+32   ) as Record<DKey, boolean[]>;
+33 
+34 const mmss = (t: number) =>
+35   `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+36 
+37 export default function Page() {
+38   return (
+39     <RouteGuard need="judge_or_coord" needEvent>
+40       <Planilha />
+41     </RouteGuard>
+42   );
+43 }
+44 
+45 function Planilha() {
+46   const sess = getSession();
+47   const eventId = sess.eventId!;
+48 
+49   /** Equipes */
+50   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+51   const [selected, setSelected] = useState("");
+52   useEffect(() => {
+53     listTeams(eventId).then(setTeams);
+54   }, [eventId]);
+55 
+56   /** Cronômetro */
+57   const [durationMin, setDurationMin] = useState(5);
+58   const [timeLeft, setTimeLeft] = useState(durationMin * 60);
+59   const [running, setRunning] = useState(false);
+60   useEffect(() => {
+61     if (!running) setTimeLeft(durationMin * 60);
+62   }, [durationMin, running]);
+63   useEffect(() => {
+64     if (!running) return;
+65     const id = setInterval(() => setTimeLeft((t) => (t > 0 ? t - 1 : 0)), 1000);
+66     return () => clearInterval(id);
+67   }, [running]);
+68 
+69   const canStart = !!selected || running;
+70   const startPause = () => {
+71     if (!selected) return;
+72     if (timeLeft <= 0) setTimeLeft(durationMin * 60);
+73     setRunning((r) => !r);
+74   };
+75   const penalty = () => running && selected && setTimeLeft((t) => Math.max(0, t - 60));
+76 
+77   /** Placar */
+78   const [tab, setTab] = useState(makeState());
+79   const [mark, setMark] = useState<Record<Attempt, 0 | 1 | 2>>({ 1: 0, 2: 0, 3: 0 });
+80   const [mina, setMina] = useState<0 | Attempt>(0);
+81   const canScore = Boolean(selected) && running && timeLeft > 0;
+82 
+83   const toggle = (d: DKey, i: number) => {
+84     if (!canScore) return;
+85     setTab((p) => {
+86       const n = { ...p };
+87       n[d] = [...n[d]];
+88       n[d][i] = !n[d][i];
+89       return n;
+90     });
+91   };
+92 
+93   const pick = (t: Attempt, q: 0 | 1 | 2) => {
+94     if (!canScore) return;
+95     setMark((p) => ({ ...p, [t]: p[t] === q ? 0 : q }));
+96   };
+97 
+98   const somaCol: Record<DKey, number> = useMemo(() => {
+99     const r: Partial<Record<DKey, number>> = {};
+100     (Object.keys(DESAFIOS) as DKey[]).forEach((k) => {
+101       r[k] = tab[k].reduce((a, on) => a + (on ? DESAFIOS[k].points : 0), 0);
+102     });
+103     return r as Record<DKey, number>;
+104   }, [tab]);
+105 
+106   const somaDes = (Object.keys(DESAFIOS) as DKey[]).reduce((a, k) => a + somaCol[k], 0);
+107   const somaMar = ATTEMPTS.reduce((a, t) => a + (mark[t] ? MARC[t] : 0), 0);
+108   const mult = mina === 0 ? 1 : MINA[mina];
+109   const total = Number(((somaDes + somaMar) * mult).toFixed(2));
+110 
+111   function resetAll() {
+112     setTab(makeState());
+113     setMark({ 1: 0, 2: 0, 3: 0 });
+114     setMina(0);
+115     setRunning(false);
+116     setTimeLeft(durationMin * 60);
+117     setSelected("");
+118   }
+119 
+120   /** salvar rodada (máx 3 por equipe; salva tempo pausado) */
+121   async function saveRound() {
+122     if (!selected) {
+123       alert("Selecione uma equipe.");
+124       return;
+125     }
+126     const elapsed = durationMin * 60 - timeLeft;
+127     await addRun(eventId, selected, total, Math.max(0, elapsed));
+128     alert(
+129       `Rodada salva!\nEquipe: ${selected}\nPontuação: ${total}\nTempo: ${mmss(Math.max(0, elapsed))}`
+130     );
+131   }
+132 
+133   const cellCls = (on: boolean) =>
+134     `cell-btn ${on ? "is-on" : "is-off"} ${canScore ? "" : "opacity-50 cursor-not-allowed"}`;
+135   const maxRows = Math.max(...(Object.values(DESAFIOS).map((v) => v.rows) as number[]));
+136 
+137   return (
+138     <main className="container-page space-y-6">
+139       <header className="card p-3 md:p-5">
+140         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+141           <div className="flex items-center gap-3">
+142             <label className="text-sm text-gray-600">EQUIPE:</label>
+143             <select
+144               className="px-3 py-1.5 border rounded-md bg-white"
+145               value={selected}
+146               onChange={(e) => setSelected(e.target.value)}
+147             >
+148               <option value="">Selecione</option>
+149               {teams.map((t) => (
+150                 <option key={t.id} value={t.name}>
+151                   {t.name}
+152                 </option>
+153               ))}
+154             </select>
+155           </div>
+156 
+157           <div className="flex flex-wrap items-center gap-3">
+158             <select
+159               className="px-2 py-1.5 border rounded-md bg-white"
+160               value={durationMin}
+161               onChange={(e) => setDurationMin(Number(e.target.value))}
+162               disabled={running}
+163               title={running ? "Pause para alterar" : "Selecione a duração"}
+164             >
+165               {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((m) => (
+166                 <option key={m}>{m}</option>
+167               ))}
+168             </select>
+169             <div className="text-3xl font-mono">{mmss(timeLeft)}</div>
+170             <button
+171               onClick={startPause}
+172               className={`px-3 py-2 border rounded-md ${!canStart ? "opacity-50 cursor-not-allowed" : ""}`}
+173               disabled={!canStart}
+174             >
+175               {running ? "Pausar" : timeLeft <= 0 ? "Reiniciar" : "Iniciar"}
+176             </button>
+177             <button
+178               onClick={penalty}
+179               disabled={!running || timeLeft <= 0 || !selected}
+180               className={`px-3 py-2 border rounded-md ${
+181                 running && timeLeft > 0 && selected ? "hover:bg-gray-50" : "opacity-50 cursor-not-allowed"
+182               }`}
+183             >
+184               Penalidade -1:00
+185             </button>
+186             <button onClick={resetAll} className="px-3 py-2 border rounded-md">
+187               Zerar
+188             </button>
+189             <button onClick={saveRound} className="px-3 py-2 border rounded-md bg-gray-900 text-white">
+190               Salvar resultado
+191             </button>
+192           </div>
+193         </div>
+194         {!selected ? (
+195           <p className="mt-3 text-xs text-red-600">Selecione uma equipe para iniciar o tempo e liberar a pontuação.</p>
+196         ) : (
+197           <p className="mt-3 text-xs text-gray-500">Pontuações só podem ser marcadas com o cronômetro em andamento.</p>
+198         )}
+199       </header>
+200 
+201       {/* Desafios */}
+202       <section className="card p-3 md:p-5">
+203         <h2 className="mb-3 grid-head">DESAFIOS DE PISTA</h2>
+204         <div className="sheet">
+205           <table>
+206             <thead>
+207               <tr>
+208                 <th className="w-28"></th>
+209                 {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+210                   <th key={k}>{DESAFIOS[k].title}</th>
+211                 ))}
+212                 <th className="w-28">SOMA</th>
+213               </tr>
+214             </thead>
+215             <tbody>
+216               {Array.from({ length: maxRows }).map((_, r) => (
+217                 <tr key={r}>
+218                   <td></td>
+219                   {(Object.keys(DESAFIOS) as DKey[]).map((k) => {
+220                     const cfg = DESAFIOS[k];
+221                     const exists = r < cfg.rows;
+222                     const on = exists ? tab[k][r] : false;
+223                     return (
+224                       <td key={k + String(r)}>
+225                         {exists ? (
+226                           <button
+227                             className={cellCls(on)}
+228                             onClick={() => toggle(k, r)}
+229                             disabled={!canScore}
+230                             title={`${cfg.points} pontos`}
+231                           >
+232                             {on ? cfg.points : ""}
+233                           </button>
+234                         ) : (
+235                           <div className="cell-btn" />
+236                         )}
+237                       </td>
+238                     );
+239                   })}
+240                   <td>
+241                     <div className="cell-btn" />
+242                   </td>
+243                 </tr>
+244               ))}
+245             </tbody>
+246             <tfoot>
+247               <tr>
+248                 <th>SOMA</th>
+249                 {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+250                   <td key={"s" + k} className="summary">
+251                     {somaCol[k]}
+252                   </td>
+253                 ))}
+254                 <td className="summary">{somaDes}</td>
+255               </tr>
+256             </tfoot>
+257           </table>
+258         </div>
+259       </section>
+260 
+261       {/* Marcadores */}
+262       <section className="card p-3 md:p-5">
+263         <h2 className="mb-3 grid-head">MARCADORES</h2>
+264         <div className="sheet">
+265           <table>
+266             <thead>
+267               <tr>
+268                 <th>Marcador</th>
+269                 <th>Tentativa 1 (100)</th>
+270                 <th>Tentativa 2 (75)</th>
+271                 <th>Tentativa 3 (50)</th>
+272                 <th>SOMA</th>
+273               </tr>
+274             </thead>
+275             <tbody>
+276               {MARKERS.map((m) => (
+277                 <tr key={"m" + m}>
+278                   <td className="font-medium">{`Marcador ${m}`}</td>
+279                   {ATTEMPTS.map((t) => {
+280                     const ativo = mark[t] === m;
+281                     return (
+282                       <td key={`m${m}t${t}`}>
+283                         <button
+284                           className={`cell-btn ${ativo ? "is-on" : "is-off"} ${
+285                             canScore ? "" : "opacity-50 cursor-not-allowed"
+286                           }`}
+287                           onClick={() => pick(t, ativo ? 0 : m)}
+288                           disabled={!canScore}
+289                         >
+290                           {ativo ? MARC[t] : ""}
+291                         </button>
+292                       </td>
+293                     );
+294                   })}
+295                   <td>
+296                     <div className="cell-btn"></div>
+297                   </td>
+298                 </tr>
+299               ))}
+300             </tbody>
+301             <tfoot>
+302               <tr>
+303                 <th>SOMA</th>
+304                 <td className="summary">{mark[1] ? 100 : 0}</td>
+305                 <td className="summary">{mark[2] ? 75 : 0}</td>
+306                 <td className="summary">{mark[3] ? 50 : 0}</td>
+307                 <td className="summary">
+308                   {ATTEMPTS.reduce((a, t) => a + (mark[t] ? MARC[t] : 0), 0)}
+309                 </td>
+310               </tr>
+311             </tfoot>
+312           </table>
+313         </div>
+314       </section>
+315 
+316       {/* Mina */}
+317       <section className="card p-3 md:p-5">
+318         <h2 className="mb-3 grid-head">MINA</h2>
+319         <div className="sheet">
+320           <table>
+321             <thead>
+322               <tr>
+323                 <th>Mina</th>
+324                 <th>Tentativa 1 (1,5x)</th>
+325                 <th>Tentativa 2 (1,25x)</th>
+326                 <th>Tentativa 3 (1,15x)</th>
+327                 <th>Multiplicador</th>
+328               </tr>
+329             </thead>
+330             <tbody>
+331               <tr>
+332                 <td className="font-medium">Mina</td>
+333                 {ATTEMPTS.map((t) => {
+334                   const ativo = mina === t;
+335                   return (
+336                     <td key={`mina${t}`}>
+337                       <button
+338                         className={`cell-btn ${ativo ? "is-on" : "is-off"}`}
+339                         onClick={() => setMina(ativo ? 0 : t)}
+340                       >
+341                         {MINA[t]}
+342                       </button>
+343                     </td>
+344                   );
+345                 })}
+346                 <td className="summary">× {mult}</td>
+347               </tr>
+348             </tbody>
+349           </table>
+350         </div>
+351       </section>
+352 
+353       {/* Nota Final */}
+354       <section className="card p-3 md:p-5">
+355         <h2 className="mb-3 grid-head">Nota final (Obstáculos + Marcadores) × Mina</h2>
+356         <div className="sheet">
+357           <table>
+358             <thead>
+359               <tr>
+360                 <th>DESAFIOS DE PISTA</th>
+361                 <th>MARCADORES</th>
+362                 <th>MINA</th>
+363                 <th>RESULTADO FINAL</th>
+364               </tr>
+365             </thead>
+366             <tbody>
+367               <tr>
+368                 <td className="summary">{somaDes}</td>
+369                 <td className="summary">{somaMar}</td>
+370                 <td className="summary">{mult}</td>
+371                 <td className="summary">{total}</td>
+372               </tr>
+373             </tbody>
+374           </table>
+375         </div>
+376       </section>
+377     </main>
+378   );
+379 }
+
+===== app/coordenacao/page.tsx =====
+1 "use client";
+2 
+3 import RouteGuard from "@/components/RouteGuard";
+4 import { useEffect, useState } from "react";
+5 import { getSession } from "@/lib/session";
+6 import { listTeams, addTeam, renameTeam, deleteTeam } from "@/lib/events";
+7 
+8 export default function Page() {
+9   return (
+10     <RouteGuard need="coord" needEvent>
+11       <Inner />
+12     </RouteGuard>
+13   );
+14 }
+15 
+16 function Inner() {
+17   const sess = getSession();
+18   const eventId = sess.eventId!;
+19 
+20   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+21   const [name, setName] = useState("");
+22   const [edit, setEdit] = useState<number | null>(null);
+23   const [val, setVal] = useState("");
+24 
+25   async function refresh() {
+26     const rows = await listTeams(eventId);
+27     setTeams(rows);
+28   }
+29 
+30   useEffect(() => {
+31     refresh();
+32   }, [eventId]);
+33 
+34   async function add() {
+35     const n = name.trim();
+36     if (!n || teams.some((t) => t.name === n)) return;
+37     await addTeam(eventId, n);
+38     setName(""); 
+39     await refresh();
+40   }
+41 
+42   async function rm(i: number) {
+43     await deleteTeam(eventId, teams[i].name);
+44     await refresh();
+45   }
+46 
+47   function start(i: number) {
+48     setEdit(i);
+49     setVal(teams[i].name);
+50   }
+51 
+52   async function save() {
+53     if (edit === null) return;
+54     const v = val.trim();
+55     if (!v) return;
+56     await renameTeam(eventId, teams[edit].name, v);
+57     setEdit(null);
+58     setVal("");
+59     await refresh();
+60   }
+61 
+62   return (
+63     <main className="container-page space-y-6">
+64       <header className="card p-4">
+65         <h1 className="text-lg font-semibold mb-2">Equipes</h1>
+66         <div className="flex gap-2">
+67           <input
+68             value={name}
+69             onChange={(e) => setName(e.target.value)}
+70             className="border rounded-md px-3 py-2 w-full"
+71             placeholder="Nome da equipe"
+72           />
+73           <button onClick={add} className="px-3 py-2 border rounded-md">
+74             Adicionar
+75           </button>
+76         </div>
+77       </header>
+78       <section className="card p-0 overflow-hidden">
+79         <table className="w-full text-sm">
+80           <thead className="bg-gray-50">
+81             <tr>
+82               <th className="text-left px-3 py-2">Equipe</th>
+83               <th className="w-40 px-3 py-2">Ações</th>
+84             </tr>
+85           </thead>
+86           <tbody>
+87             {teams.length === 0 ? (
+88               <tr>
+89                 <td colSpan={2} className="px-3 py-6 text-center text-gray-500">
+90                   Nenhuma equipe.
+91                 </td>
+92               </tr>
+93             ) : (
+94               teams.map((t, i) => (
+95                 <tr key={t.id} className={i % 2 ? "bg-white" : "bg-gray-50/60"}>
+96                   <td className="px-3 py-2">
+97                     {edit === i ? (
+98                       <input
+99                         value={val}
+100                         onChange={(e) => setVal(e.target.value)}
+101                         className="border rounded-md px-2 py-1 w-full"
+102                       />
+103                     ) : (
+104                       t.name
+105                     )}
+106                   </td>
+107                   <td className="px-3 py-2 flex gap-2">
+108                     {edit === i ? (
+109                       <>
+110                         <button onClick={save} className="px-2 py-1 border rounded-md">
+111                           Salvar
+112                         </button>
+113                         <button
+114                           onClick={() => {
+115                             setEdit(null);
+116                             setVal("");
+117                           }}
+118                           className="px-2 py-1 border rounded-md"
+119                         >
+120                           Cancelar
+121                         </button>
+122                       </>
+123                     ) : (
+124                       <>
+125                         <button
+126                           onClick={() => start(i)}
+127                           className="px-2 py-1 border rounded-md"
+128                         >
+129                           Editar
+130                         </button>
+131                         <button
+132                           onClick={() => rm(i)}
+133                           className="px-2 py-1 border rounded-md"
+134                         >
+135                           Excluir
+136                         </button>
+137                       </>
+138                     )}
+139                   </td>
+140                 </tr>
+141               ))
+142             )}
+143           </tbody>
+144         </table>
+145       </section>
+146     </main>
+147   );
+148 }
+
+===== app/resultado/page.tsx =====
+1 "use client";
+2 
+3 import { useEffect, useMemo, useState } from "react";
+4 import { getSession } from "@/lib/session";
+5 import { listRuns } from "@/lib/events";
+6 import { Run, compute } from "@/lib/ranking";
+7 
+8 const mmss=(t:number)=>`${String(Math.floor(t/60)).padStart(2,"0")}:${String(t%60).padStart(2,"0")}`;
+9 
+10 export default function ResultadoPage(){
+11   const sess = getSession();
+12   const eventId = sess.eventId;
+13   const [runs,setRuns]=useState<Run[]>([]);
+14   useEffect(()=>{ if(eventId) listRuns(eventId).then(setRuns); },[eventId]);
+15 
+16   const byTeam = useMemo(()=>{ const m=new Map<string,Run[]>(); for(const r of runs){ if(!m.has(r.team)) m.set(r.team,[]); m.get(r.team)!.push(r);} for(const a of m.values()) a.sort((x,y)=>x.at-y.at); return m;},[runs]);
+17   const rows = useMemo(()=>compute(byTeam),[byTeam]);
+18 
+19   return (
+20     <main className="container-page max-w-4xl mx-auto space-y-6">
+21       <header className="flex items-center justify-between gap-4">
+22         <div><h1 className="text-2xl md:text-3xl font-bold">Copa Criciúma de Robótica</h1><p className="text-sm text-gray-500">Ranking — 2 melhores; desempate por soma total e menor tempo.</p></div>
+23         <div className="h-12 w-12 md:h-14 md:w-14 rounded-lg border flex items-center justify-center text-xs text-gray-500 bg-white">LOGO</div>
+24       </header>
+25       <section className="card p-3 md:p-5">
+26         <div className="overflow-x-auto">
+27           <table className="min-w-full text-sm">
+28             <thead><tr className="text-left"><th className="px-2 py-2">#</th><th className="px-2 py-2">Equipe</th><th className="px-2 py-2">Ranking (2 melhores)</th><th className="px-2 py-2">Tempo (2 melhores)</th></tr></thead>
+29             <tbody>
+30               {rows.length===0 ? <tr><td colSpan={4} className="px-2 py-8 text-center text-gray-500">Sem rodadas salvas.</td></tr> :
+31                rows.map((r,i)=>(
+32                 <tr key={r.team} className={i%2?"bg-white":"bg-gray-50/60"}>
+33                   <td className="px-2 py-2 font-semibold">{i+1}</td>
+34                   <td className="px-2 py-2">{r.team}</td>
+35                   <td className="px-2 py-2 font-semibold">{r.rankingScore.toFixed(2)}</td>
+36                   <td className="px-2 py-2">{mmss(r.tieTime)}</td>
+37                 </tr>
+38                ))}
+39             </tbody>
+40           </table>
+41         </div>
+42       </section>
+43     </main>
+44   );
+45 }
