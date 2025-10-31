@@ -143,7 +143,9 @@ function Planilha() {
 
   const cellCls = (on: boolean) =>
     `cell-btn ${on ? "is-on" : "is-off"} ${canScore ? "" : "opacity-50 cursor-not-allowed"}`;
-  const maxRows = Math.max(...(Object.values(DESAFIOS).map((v) => v.rows) as number[]));
+  const maxRows = Math.max(
+    ...Object.values(DESAFIOS).map((v) => v.rows)
+  ); // Corrigido para garantir que maxRows não quebre
 
   return (
     <main className="container-page space-y-6">
@@ -286,7 +288,7 @@ function Planilha() {
             <tbody>
               {MARKERS.map((m) => (
                 <tr key={"m" + m}>
-                  <td className="font-medium">{`Marcador ${m}`td>
+                  <td className="font-medium">{`Marcador ${m}`}</td>
                   {ATTEMPTS.map((t) => {
                     const ativo = mark[t] === m;
                     return (
