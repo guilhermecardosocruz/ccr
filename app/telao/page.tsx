@@ -40,7 +40,7 @@ export default function TelaoPage() {
 
   const rows = useMemo(() => compute(byTeam), [byTeam]);
 
-  // Pegar somente a primeira linha
+  // Pegar somente a primeira linha, se disponível
   const firstRow = rows.length > 0 ? rows[0] : null;
 
   // Alternar entre o placar e as imagens a cada 10 segundos
