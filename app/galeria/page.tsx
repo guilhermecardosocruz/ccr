@@ -20,7 +20,7 @@ export default function GaleriaPage() {
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
-          setImages([...images, reader.result as string]);
+          setImages([...images, reader.result as string]);  // Adiciona imagem ao estado
         }
       };
       reader.readAsDataURL(newImage); // Converte o arquivo para URL
