@@ -3,16 +3,23 @@
 import RouteGuard from "@/components/RouteGuard";
 import { useEffect, useState } from "react";
 import { getSession, setSession } from "@/lib/session";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { createEvent, listEvents, clearTeamsAndRuns } from "@/lib/events";
 import { setEventPins } from "@/lib/pin";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-function genNumeric(n:number){ return Array.from({length:n},()=>Math.floor(Math.random()*10)).join(""); }
-function genAlphaNum(n:number){ const cs="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let o=""; for(let i=0;i<n;i++) o+=cs[Math.floor(Math.random()*cs.length)]; return o; }
+function genNumeric(n: number) {
+  return Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join("");
+}
+function genAlphaNum(n: number) {
+  const cs = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let o = "";
+  for (let i = 0; i < n; i++) o += cs[Math.floor(Math.random() * cs.length)];
+  return o;
+}
 
-function Modal({open,onClose,title,children}:{open:boolean;onClose:()=>void;title?:string;children:React.ReactNode}) {
-  if(!open) return null;
+function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title?: string; children: React.ReactNode }) {
+  if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
       <div className="bg-white rounded-xl shadow-xl border w-full max-w-md p-5">
@@ -35,74 +42,40 @@ export default function GestorPage() {
 }
 
 function GestorInner() {
-  const [events, setEvents] = useState<{id:string; name:string}[]>([]);
+  const [events, setEvents] = useState<{ id: string; name: string }[]>([]);
   const [name, setName] = useState("");
-  const [showPinsOf, setShowPinsOf] = useState<string|null>(null);
-  const [plainPins, setPlainPins] = useState<{judgePin?:string; coordPin?:string}>({});
-
-
+  const [showPinsOf, setShowPinsOf] = useState<string | null>(null);
+  const [plainPins, setPlainPins] = useState<{ judgePin?: string; coordPin?: string }>({});
   const router = useRouter();
-  function openFor(id: string, path: string) {
-    const s = getSession();
-    setSession({ ...s, eventId: id });
-    router.push(path);
-  }
 
   async function refresh() {
     const rows = await listEvents();
     setEvents(rows);
   }
 
-  useEffect(()=>{ refresh(); }, []);
+  useEffect(() => { refresh(); }, []);
 
   async function addEvent() {
-    const n = name.trim(); if (!n) return;
+    const n = name.trim();
+    if (!n) return;
     const e = await createEvent(n);
     setName(""); await refresh();
-    // gera PINs padrão (compatibilidade legado: cliente gera e envia)
     const j = genNumeric(6), c = genAlphaNum(8);
     await setEventPins(e.id, j, c);
     setPlainPins({ judgePin: j, coordPin: c });
     setShowPinsOf(e.id);
   }
 
-  function makeActive(id: string) {
+  function openFor(id: string, path: string) {
     const s = getSession();
     setSession({ ...s, eventId: id });
-    alert("Evento ativo selecionado.");
-  }
-
-  // Mostrar PINs agora sempre solicita PINs novos (rotate:true) para ter plaintext
-  async function showPins(id: string) {
-    try {
-      const res = await setEventPins(id, { rotate: true });
-      if (!res.ok) {
-        alert("Falha ao obter PINs: " + (res.error || "erro desconhecido"));
-        return;
-      }
-      setPlainPins(res.pins || {});
-      setShowPinsOf(id);
-    } catch (err) {
-      console.error("showPins error", err);
-      alert("Erro ao solicitar PINs.");
-    }
-  }
-
-  async function rotatePins(id: string) {
-    const j = genNumeric(6), c = genAlphaNum(8);
-    await setEventPins(id, j, c);
-    setPlainPins({ judgePin: j, coordPin: c });
-    setShowPinsOf(id);
+    router.push(path);
   }
 
   async function resetData(id: string) {
     if (!confirm("Limpar equipes e resultados deste evento?")) return;
     await clearTeamsAndRuns(id);
     alert("Dados limpos.");
-  }
-
-  function copy(txt: string) {
-    navigator.clipboard.writeText(txt).then(()=>alert("Copiado!"));
   }
 
   return (
@@ -139,13 +112,10 @@ function GestorInner() {
                 <td className="px-3 py-2">••••••</td>
                 <td className="px-3 py-2">••••••••</td>
                 <td className="px-3 py-2 flex flex-wrap gap-2">
-                  <button onClick={() => makeActive(e.id)} className="px-2 py-1 border rounded-md">Ativar evento</button>
-                  <button onClick={() => openFor(e.id, "/planilha")} className="px-2 py-1 border rounded-md">Planilha</button>
-                  <button onClick={() => openFor(e.id, "/equipes")} className="px-2 py-1 border rounded-md">Equipes</button>
-                  <button onClick={() => openFor(e.id, "/coordenacao")} className="px-2 py-1 border rounded-md">Coordenação</button>
-                  <button onClick={() => openFor(e.id, "/resultado")} className="px-2 py-1 border rounded-md">Resultado</button>  {/* Adicionado Resultado */}
-                  <button onClick={() => showPins(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
-                  <button onClick={() => rotatePins(e.id)} className="px-2 py-1 border rounded-md">Rotacionar PINs</button>
+                  <button onClick={() => openFor(e.id, "/planilha?eventId=" + e.id)} className="px-2 py-1 border rounded-md">Planilha</button>
+                  <button onClick={() => openFor(e.id, "/equipes?eventId=" + e.id)} className="px-2 py-1 border rounded-md">Equipes</button>
+                  <button onClick={() => openFor(e.id, "/coordenacao?eventId=" + e.id)} className="px-2 py-1 border rounded-md">Coordenação</button>
+                  <button onClick={() => openFor(e.id, "/resultado?eventId=" + e.id)} className="px-2 py-1 border rounded-md">Resultado</button>
                   <button onClick={() => resetData(e.id)} className="px-2 py-1 border rounded-md">Limpar dados</button>
                 </td>
               </tr>
