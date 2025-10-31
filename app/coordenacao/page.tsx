@@ -1,9 +1,12 @@
 "use client";
 
 import RouteGuard from "@/components/RouteGuard";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getSession } from "@/lib/session";
-import { listTeams, addTeam, renameTeam, deleteTeam } from "@/lib/events";
+import { listTeams, listRuns } from "@/lib/events";
+import { Run as R, compute } from "@/lib/ranking";
+
+const mmss = (t: number) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 
 export default function Page() {
   return (
@@ -18,130 +21,88 @@ function Inner() {
   const eventId = sess.eventId!;
 
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
-  const [name, setName] = useState("");
-  const [edit, setEdit] = useState<number | null>(null);
-  const [val, setVal] = useState("");
+  useEffect(() => { listTeams(eventId).then(setTeams); }, [eventId]);
 
-  async function refresh() {
-    const rows = await listTeams(eventId);
-    setTeams(rows);
-  }
+  const [runs, setRuns] = useState<R[]>([]);
+  useEffect(() => { listRuns(eventId).then(setRuns); }, [eventId]);
 
-  useEffect(() => {
-    refresh();
-  }, [eventId]);
+  const byTeam = useMemo(() => {
+    const m = new Map<string, R[]>();
+    for (const r of runs) {
+      if (!m.has(r.team)) m.set(r.team, []);
+      m.get(r.team)!.push(r);
+    }
+    for (const a of m.values()) a.sort((x, y) => x.at - y.at);
+    return m;
+  }, [runs]);
 
-  async function add() {
-    const n = name.trim();
-    if (!n || teams.some((t) => t.name === n)) return;
-    await addTeam(eventId, n);
-    setName(""); 
-    await refresh();
-  }
-
-  async function rm(i: number) {
-    await deleteTeam(eventId, teams[i].name);
-    await refresh();
-  }
-
-  function start(i: number) {
-    setEdit(i);
-    setVal(teams[i].name);
-  }
-
-  async function save() {
-    if (edit === null) return;
-    const v = val.trim();
-    if (!v) return;
-    await renameTeam(eventId, teams[edit].name, v);
-    setEdit(null);
-    setVal("");
-    await refresh();
-  }
+  const rows = useMemo(() => compute(byTeam), [byTeam]);
 
   return (
-    <main className="container-page space-y-6">
-      <header className="card p-4">
-        <h1 className="text-lg font-semibold mb-2">Equipes</h1>
-        <div className="flex gap-2">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="border rounded-md px-3 py-2 w-full"
-            placeholder="Nome da equipe"
-          />
-          <button onClick={add} className="px-3 py-2 border rounded-md">
-            Adicionar
-          </button>
+    <main className="container-page max-w-6xl mx-auto space-y-6">
+      <header className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold">Copa Criciúma de Robótica</h1>
+          <p className="text-sm text-gray-500">Coordenação — gerenciamento de equipes e visão completa (3 rodadas).</p>
         </div>
+        <div className="h-12 w-12 md:h-14 md:w-14 rounded-lg border flex items-center justify-center text-xs text-gray-500 bg-white">LOGO</div>
       </header>
-      <section className="card p-0 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="text-left px-3 py-2">Equipe</th>
-              <th className="w-40 px-3 py-2">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {teams.length === 0 ? (
-              <tr>
-                <td colSpan={2} className="px-3 py-6 text-center text-gray-500">
-                  Nenhuma equipe.
-                </td>
+
+      {/* lista simples de equipes */}
+      <section className="card p-4 space-y-4">
+        <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Equipes do evento</h2>
+        <ul className="list-disc pl-6 text-sm">
+          {teams.map((t) => <li key={t.id}>{t.name}</li>)}
+        </ul>
+      </section>
+
+      {/* Ranking detalhado */}
+      <section className="card p-3 md:p-5">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left">
+                <th className="px-2 py-2">#</th>
+                <th className="px-2 py-2">Equipe</th>
+                <th className="px-2 py-2">Rod. 1</th>
+                <th className="px-2 py-2">Rod. 2</th>
+                <th className="px-2 py-2">Rod. 3</th>
+                <th className="px-2 py-2">Ranking</th>
+                <th className="px-2 py-2">Soma total</th>
+                <th className="px-2 py-2">Tempo (considerado)</th>
               </tr>
-            ) : (
-              teams.map((t, i) => (
-                <tr key={t.id} className={i % 2 ? "bg-white" : "bg-gray-50/60"}>
-                  <td className="px-3 py-2">
-                    {edit === i ? (
-                      <input
-                        value={val}
-                        onChange={(e) => setVal(e.target.value)}
-                        className="border rounded-md px-2 py-1 w-full"
-                      />
-                    ) : (
-                      t.name
-                    )}
-                  </td>
-                  <td className="px-3 py-2 flex gap-2">
-                    {edit === i ? (
-                      <>
-                        <button onClick={save} className="px-2 py-1 border rounded-md">
-                          Salvar
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEdit(null);
-                            setVal("");
-                          }}
-                          className="px-2 py-1 border rounded-md"
-                        >
-                          Cancelar
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => start(i)}
-                          className="px-2 py-1 border rounded-md"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => rm(i)}
-                          className="px-2 py-1 border rounded-md"
-                        >
-                          Excluir
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={8} className="px-2 py-8 text-center text-gray-500">Sem rodadas salvas.</td></tr>
+              ) : rows.map((r, i) => {
+                  const cells = [0, 1, 2].map(k => {
+                    const run = r.runs[k]; 
+                    if (!run) return <td key={k} className="px-2 py-2 text-gray-400">—</td>;
+                    const considered = r.pickedIdx.includes(k);
+                    return (
+                      <td key={k} className="px-2 py-2">
+                        <div className={`inline-flex flex-col rounded-md border px-2 py-1 ${considered ? "bg-gray-50" : "opacity-80"}`}>
+                          <span className="font-medium">{run.score.toFixed(2)}</span>
+                          <span className="text-[11px] text-gray-500">{mmss(run.timeSec)}</span>
+                        </div>
+                      </td>
+                    );
+                  });
+                  return (
+                    <tr key={r.team} className={i % 2 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-2 py-2 font-semibold">{i + 1}</td>
+                      <td className="px-2 py-2">{r.team}</td>
+                      {cells}
+                      <td className="px-2 py-2 font-semibold">{r.rankingScore.toFixed(2)}</td>
+                      <td className="px-2 py-2">{r.tieTotal.toFixed(2)}</td>
+                      <td className="px-2 py-2">{mmss(r.tieTime)}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   );
