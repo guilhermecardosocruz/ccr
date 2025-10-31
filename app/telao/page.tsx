@@ -40,6 +40,9 @@ export default function TelaoPage() {
 
   const rows = useMemo(() => compute(byTeam), [byTeam]);
 
+  // Pegar somente a primeira linha
+  const firstRow = rows.length > 0 ? rows[0] : null;
+
   // Alternar entre o placar e as imagens a cada 10 segundos
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -56,7 +59,7 @@ export default function TelaoPage() {
         <div className="telão w-full h-full flex justify-center items-center">
           {showImage ? (
             <img src={images[imageIndex]} alt={`Imagem ${imageIndex + 1}`} className="w-full h-full object-cover" />
-          ) : (
+          ) : firstRow ? (
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left">
@@ -67,24 +70,16 @@ export default function TelaoPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="px-2 py-8 text-center text-gray-500">
-                      Sem rodadas salvas.
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((r, i) => (
-                    <tr key={r.team} className={i % 2 ? "bg-white" : "bg-gray-50/60"}>
-                      <td className="px-2 py-2 font-semibold">{i + 1}</td>
-                      <td className="px-2 py-2">{r.team}</td>
-                      <td className="px-2 py-2 font-semibold">{r.rankingScore.toFixed(2)}</td>
-                      <td className="px-2 py-2">{mmss(r.tieTime)}</td>
-                    </tr>
-                  ))
-                )}
+                <tr className="bg-white">
+                  <td className="px-2 py-2 font-semibold">1</td>
+                  <td className="px-2 py-2">{firstRow.team}</td>
+                  <td className="px-2 py-2 font-semibold">{firstRow.rankingScore.toFixed(2)}</td>
+                  <td className="px-2 py-2">{mmss(firstRow.tieTime)}</td>
+                </tr>
               </tbody>
             </table>
+          ) : (
+            <div className="text-center text-xl font-bold">Sem dados disponíveis</div>
           )}
         </div>
       ) : (
