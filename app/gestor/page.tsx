@@ -61,6 +61,8 @@ function GestorInner() {
     const e = await createEvent(n);
     setName(""); await refresh();
     const j = genNumeric(6), c = genAlphaNum(8);
+
+    // Definindo os PINs para o evento criado
     await setEventPins(e.id, j, c);
     setPlainPins({ judgePin: j, coordPin: c });
     setShowPinsOf(e.id);
