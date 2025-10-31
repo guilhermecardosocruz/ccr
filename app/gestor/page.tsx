@@ -83,6 +83,29 @@ function GestorInner() {
     navigator.clipboard.writeText(txt).then(() => alert("Copiado!"));
   }
 
+  // Função para exibir PINs
+  async function showPins(id: string) {
+    try {
+      const res = await setEventPins(id, { rotate: true });
+      if (!res.ok) {
+        alert("Falha ao obter PINs: " + (res.error || "erro desconhecido"));
+        return;
+      }
+      setPlainPins(res.pins || {});
+      setShowPinsOf(id);
+    } catch (err) {
+      console.error("showPins error", err);
+      alert("Erro ao solicitar PINs.");
+    }
+  }
+
+  async function rotatePins(id: string) {
+    const j = genNumeric(6), c = genAlphaNum(8);
+    await setEventPins(id, j, c);
+    setPlainPins({ judgePin: j, coordPin: c });
+    setShowPinsOf(id);
+  }
+
   return (
     <main className="container-page space-y-6">
       <header className="card p-4">
@@ -122,6 +145,8 @@ function GestorInner() {
                   <button onClick={() => openFor(e.id, "/coordenacao?eventId=" + e.id)} className="px-2 py-1 border rounded-md">Coordenação</button>
                   <button onClick={() => openFor(e.id, "/resultado?eventId=" + e.id)} className="px-2 py-1 border rounded-md">Resultado</button>
                   <button onClick={() => resetData(e.id)} className="px-2 py-1 border rounded-md">Limpar dados</button>
+                  <button onClick={() => showPins(e.id)} className="px-2 py-1 border rounded-md">Mostrar PINs</button>
+                  <button onClick={() => rotatePins(e.id)} className="px-2 py-1 border rounded-md">Rotacionar PINs</button>
                 </td>
               </tr>
             ))}
