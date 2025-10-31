@@ -78,6 +78,11 @@ function GestorInner() {
     alert("Dados limpos.");
   }
 
+  // Função para copiar para a área de transferência
+  function copy(txt: string) {
+    navigator.clipboard.writeText(txt).then(() => alert("Copiado!"));
+  }
+
   return (
     <main className="container-page space-y-6">
       <header className="card p-4">
