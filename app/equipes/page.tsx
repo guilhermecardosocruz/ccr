@@ -23,7 +23,9 @@ function Inner(){
   const [val,setVal]=useState("");
 
   async function refresh() {
-    const rows = await listTeams(new URLSearchParams(window.location.search).get("eventId"));
+    const eventId = new URLSearchParams(window.location.search).get("eventId");
+if (!eventId) { alert("Evento não encontrado."); return; }
+const rows = await listTeams(eventId);
     setTeams(rows);
   }
 
