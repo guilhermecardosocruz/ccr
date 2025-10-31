@@ -38,6 +38,12 @@ function Inner() {
 
   const rows = useMemo(() => compute(byTeam), [byTeam]);
 
+  function openFor(id: string, path: string) {
+    const s = getSession();
+    setSession({ ...s, eventId: id });
+    router.push(path); // Redireciona para a URL especificada
+  }
+
   return (
     <main className="container-page max-w-6xl mx-auto space-y-6">
       <header className="flex items-center justify-between gap-4">
@@ -47,6 +53,16 @@ function Inner() {
         </div>
         <div className="h-12 w-12 md:h-14 md:w-14 rounded-lg border flex items-center justify-center text-xs text-gray-500 bg-white">LOGO</div>
       </header>
+
+      {/* Botão para o Telão */}
+      <section className="card p-4 space-y-4">
+        <button
+          onClick={() => openFor(eventId, "/telao")}
+          className="px-2 py-1 border rounded-md bg-blue-500 text-white"
+        >
+          Telão
+        </button>
+      </section>
 
       {/* lista simples de equipes */}
       <section className="card p-4 space-y-4">
