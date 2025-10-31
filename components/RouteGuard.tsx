@@ -1,18 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSession } from "@/lib/session";
+import { getSession, setSession } from "@/lib/session";
 import { useRouter } from "next/navigation";
 
 type Need = "any" | "admin" | "judge" | "coord" | "judge_or_coord";
-
-function hasPermission(role: "admin"|"judge"|"coord"|null, need: Need) {
-  if (need === "any") return true;
-  if (role === "admin") return true; // admin vê tudo (superusuário)
-  if (!role) return false;
-  if (need === "judge_or_coord") return role === "judge" || role === "coord";
-  return role === need;
-}
 
 export default function RouteGuard({
   need,
@@ -28,22 +20,53 @@ export default function RouteGuard({
 
   useEffect(() => {
     const s = getSession();
+
+    // 1) Autenticação básica
     if (!s.authed || !s.role) {
       router.replace("/login");
       return;
     }
 
-    if (!hasPermission(s.role, need)) {
-      // redireciona para a melhor página disponível
-      if (s.role === "admin") router.replace("/gestor");
-      else router.replace("/planilha");
+    // 2) Permissão por role
+    const allowed =
+      need === "any"
+        ? true
+        : need === "judge_or_coord"
+        ? s.role === "judge" || s.role === "coord"
+        : s.role === need;
+
+    if (!allowed) {
+      // Admin sempre vai para /gestor
+      if (s.role === "admin") {
+        router.replace("/gestor");
+        return;
+      }
+      // Juiz/Coord sem permissão específica => leva para planilha
+      if (s.role === "judge" || s.role === "coord") {
+        router.replace("/planilha");
+        return;
+      }
       return;
     }
 
+    // 3) Garantir eventId quando necessário (pega da URL se não houver na sessão)
     if (needEvent && !s.eventId) {
-      // sem evento ativo, volta ao gestor para escolher/ativar
-      router.replace("/gestor");
-      return;
+      try {
+        const q = new URLSearchParams(window.location.search);
+        const id = q.get("eventId");
+        if (id) {
+          setSession({ ...s, eventId: id });
+        } else {
+          // Sem eventId -> volta ao gestor (admin) ou login (demais)
+          if (s.role === "admin") router.replace("/gestor");
+          else router.replace("/login");
+          return;
+        }
+      } catch {
+        if (s.role === "admin") router.replace("/gestor");
+        else router.replace("/login");
+        return;
+      }
     }
 
     setOk(true);
