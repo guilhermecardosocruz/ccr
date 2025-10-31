@@ -60,7 +60,7 @@ export default function TelaoPage(){
   }, [showImage, images.length]);
 
   return (
-    <main className="w-full h-screen bg-black flex items-center justify-center">
+    <main className="w-full h-screen bg-white flex items-center justify-center">
       {/* Alternar entre a exibição de imagens e placar */}
       {isTelãoActive ? (
         <div className="w-full h-full flex justify-center items-center">
@@ -68,7 +68,7 @@ export default function TelaoPage(){
             <img src={images[imageIndex]} alt={`Imagem ${imageIndex + 1}`} className="w-full h-full object-cover" />
           ) : (
             <div className="overflow-x-auto w-full h-full">
-              <table className="min-w-full text-sm text-white">
+              <table className="min-w-full text-sm text-black">
                 <thead>
                   <tr className="text-left">
                     <th className="px-2 py-2">#</th>
