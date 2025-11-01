@@ -98,7 +98,14 @@ function Planilha() {
 
   const pick = (t: Attempt, q: 0 | 1 | 2) => {
     if (!canScore) return;
-    setMark((p) => ({ ...p, [t]: p[t] === q ? 0 : q }));
+    setMark((p) => {
+      // Ajuste para garantir que apenas uma seleção por coluna seja permitida
+      const newMark = { ...p, [t]: q }; 
+      // Limpa as tentativas anteriores da mesma coluna
+      if (t === 1) newMark[2] = 0; 
+      if (t === 2) newMark[1] = 0;
+      return newMark;
+    });
   };
 
   const somaCol: Record<DKey, number> = useMemo(() => {
