@@ -19,8 +19,8 @@ const DESAFIOS: Record<DKey, { title: string; points: number; rows: number }> = 
   gap: { title: "Gap (15)", points: 15, rows: 5 },
   obstaculo: { title: "Obstáculo (20)", points: 20, rows: 5 },
   intercepcao: { title: "Intercepção (20)", points: 20, rows: 5 },
-  chegada: { title: "Chegada (20)", points: 20, rows: 5 },
-  fato: { title: "Fato Histórico (50)", points: 50, rows: 5 }, // Alterado para 50 pontos
+  chegada: { title: "Chegada (50)", points: 50, rows: 5 }, // Alterado para 50 pontos
+  fato: { title: "Fato Histórico (50)", points: 50, rows: 5 },
 } as const;
 
 const MARC = { 1: 100, 2: 75, 3: 50 } as const;
