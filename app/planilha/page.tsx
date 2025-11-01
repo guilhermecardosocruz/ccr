@@ -15,12 +15,12 @@ type Attempt = (typeof ATTEMPTS)[number]; // 1 | 2 | 3
 /** Config */
 type DKey = "lombadas" | "gap" | "obstaculo" | "intercepcao" | "chegada" | "fato";
 const DESAFIOS: Record<DKey, { title: string; points: number; rows: number }> = {
-  lombadas: { title: "Lombadas (15)", points: 15, rows: 5 },
-  gap: { title: "Gap (15)", points: 15, rows: 5 },
-  obstaculo: { title: "Obstáculo (20)", points: 20, rows: 5 },
-  intercepcao: { title: "Intercepção (20)", points: 20, rows: 5 },
-  chegada: { title: "Chegada (50)", points: 50, rows: 5 }, // Alterado para 50 pontos
-  fato: { title: "Fato Histórico (50)", points: 50, rows: 5 },
+  lombadas:     { title: "Lombadas (15)",       points: 15, rows: 5 },
+  gap:          { title: "Gap (15)",            points: 15, rows: 5 },
+  obstaculo:    { title: "Obstáculo (20)",      points: 20, rows: 5 },
+  intercepcao:  { title: "Intercepção (20)",    points: 20, rows: 5 },
+  chegada:      { title: "Chegada (50)",        points: 50, rows: 5 }, // 50 pontos
+  fato:         { title: "Fato Histórico (50)", points: 50, rows: 5 },
 } as const;
 
 const MARC = { 1: 100, 2: 75, 3: 50 } as const;
@@ -44,6 +44,7 @@ export default function Page() {
 
 function Planilha() {
   const sess = getSession();
+  // Robusto: aceita da sessão ou da URL (?eventId=)
   const eventId =
     sess.eventId ||
     (typeof window !== "undefined"
@@ -62,9 +63,11 @@ function Planilha() {
   const [durationMin, setDurationMin] = useState(5);
   const [timeLeft, setTimeLeft] = useState(durationMin * 60);
   const [running, setRunning] = useState(false);
+
   useEffect(() => {
     if (!running) setTimeLeft(durationMin * 60);
   }, [durationMin, running]);
+
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => setTimeLeft((t) => (t > 0 ? t - 1 : 0)), 1000);
@@ -77,14 +80,23 @@ function Planilha() {
     if (timeLeft <= 0) setTimeLeft(durationMin * 60);
     setRunning((r) => !r);
   };
-  const penalty = () =>
-    running && selected && setTimeLeft((t) => Math.max(0, t - 60));
+  const penalty = () => running && selected && setTimeLeft((t) => Math.max(0, t - 60));
 
-  /** Placar */
+  /** Placar — Desafios */
   const [tab, setTab] = useState(makeState());
-  const [mark, setMark] = useState<Record<Attempt, 0 | 1 | 2>>({ 1: 0, 2: 0, 3: 0 });
+
+  /** Placar — Marcadores
+   * Regra: 1 tentativa por marcador (linha). 0 = nenhuma; 1/2/3 = tentativa escolhida.
+   */
+  const [markerPick, setMarkerPick] = useState<Record<Marker, 0 | Attempt>>({ 1: 0, 2: 0 });
+
+  /** Mina (exclusiva entre tentativas) */
   const [mina, setMina] = useState<0 | Attempt>(0);
-  const canScore = Boolean(selected) && running && timeLeft > 0;
+
+  /** Pode pontuar: time escolhido e ainda há tempo (>0).
+   * -> edição liberada tanto rodando quanto pausado (conferência).
+   */
+  const canScore = Boolean(selected) && timeLeft > 0;
 
   const toggle = (d: DKey, i: number) => {
     if (!canScore) return;
@@ -96,16 +108,10 @@ function Planilha() {
     });
   };
 
-  const pick = (t: Attempt, q: 0 | 1 | 2) => {
+  // Seleciona a tentativa para um marcador (uma por linha)
+  const pickMarker = (m: Marker, t: Attempt) => {
     if (!canScore) return;
-    setMark((p) => {
-      const newMark = { ...p, [t]: q };
-
-      // Limpa as tentativas anteriores da mesma coluna
-      if (t === 1) newMark[2] = 0; // Desmarca a tentativa 2 quando a tentativa 1 for marcada
-      if (t === 2) newMark[1] = 0; // Desmarca a tentativa 1 quando a tentativa 2 for marcada
-      return newMark;
-    });
+    setMarkerPick((p) => ({ ...p, [m]: p[m] === t ? 0 : t }));
   };
 
   const somaCol: Record<DKey, number> = useMemo(() => {
@@ -117,13 +123,19 @@ function Planilha() {
   }, [tab]);
 
   const somaDes = (Object.keys(DESAFIOS) as DKey[]).reduce((a, k) => a + somaCol[k], 0);
-  const somaMar = ATTEMPTS.reduce((a, t) => a + (mark[t] ? MARC[t] : 0), 0);
+
+  // Soma dos marcadores = soma das tentativas escolhidas por marcador
+  const somaMar = (MARKERS as Marker[]).reduce((a, m) => {
+    const t = markerPick[m];
+    return a + (t ? MARC[t] : 0);
+  }, 0);
+
   const mult = mina === 0 ? 1 : MINA[mina];
   const total = Number(((somaDes + somaMar) * mult).toFixed(2));
 
   function resetAll() {
     setTab(makeState());
-    setMark({ 1: 0, 2: 0, 3: 0 });
+    setMarkerPick({ 1: 0, 2: 0 });
     setMina(0);
     setRunning(false);
     setTimeLeft(durationMin * 60);
@@ -140,6 +152,10 @@ function Planilha() {
       alert("Evento inválido.");
       return;
     }
+    if (running) {
+      alert("Pause o tempo para salvar o resultado.");
+      return;
+    }
     const elapsed = durationMin * 60 - timeLeft;
     await addRun(eventId, selected, total, Math.max(0, elapsed));
     alert(
@@ -149,9 +165,7 @@ function Planilha() {
 
   const cellCls = (on: boolean) =>
     `cell-btn ${on ? "is-on" : "is-off"} ${canScore ? "" : "opacity-50 cursor-not-allowed"}`;
-  const maxRows = Math.max(
-    ...Object.values(DESAFIOS).map((v) => v.rows)
-  ); // Corrigido para garantir que maxRows não quebre
+  const maxRows = Math.max(...Object.values(DESAFIOS).map((v) => v.rows));
 
   return (
     <main className="container-page space-y-6">
@@ -205,15 +219,22 @@ function Planilha() {
             <button onClick={resetAll} className="px-3 py-2 border rounded-md">
               Zerar
             </button>
-            <button onClick={saveRound} className="px-3 py-2 border rounded-md bg-gray-900 text-white">
+            <button
+              onClick={saveRound}
+              disabled={!selected || running}
+              title={running ? "Pause o cronômetro para salvar" : ""}
+              className={`px-3 py-2 border rounded-md ${!selected || running ? "opacity-50 cursor-not-allowed" : "bg-gray-900 text-white"}`}
+            >
               Salvar resultado
             </button>
           </div>
         </div>
         {!selected ? (
-          <p className="mt-3 text-xs text-red-600">Selecione uma equipe para iniciar o tempo e liberar a pontuação.</p>
+          <p className="mt-3 text-xs text-red-600">Selecione uma equipe para iniciar o tempo.</p>
         ) : (
-          <p className="mt-3 text-xs text-gray-500">Pontuações só podem ser marcadas com o cronômetro em andamento.</p>
+          <p className="mt-3 text-xs text-gray-500">
+            Você pode marcar/desmarcar mesmo com o tempo pausado. Salvar só com o tempo pausado.
+          </p>
         )}
       </header>
 
@@ -224,35 +245,105 @@ function Planilha() {
           <table>
             <thead>
               <tr>
-                <th>Desafio</th>
-                {MARKERS.map((m) => (
-                  <th key={m}>Marcador {m}</th>
+                <th className="w-28"></th>
+                {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+                  <th key={k}>{DESAFIOS[k].title}</th>
                 ))}
+                <th className="w-28">SOMA</th>
               </tr>
             </thead>
             <tbody>
-              {ATTEMPTS.map((t) => (
-                <tr key={`t${t}`}>
-                  <td>Tentativa {t}</td>
-                  {MARKERS.map((m) => {
-                    const ativo = mark[t] === m;
+              {Array.from({ length: maxRows }).map((_, r) => (
+                <tr key={r}>
+                  <td></td>
+                  {(Object.keys(DESAFIOS) as DKey[]).map((k) => {
+                    const cfg = DESAFIOS[k];
+                    const exists = r < cfg.rows;
+                    const on = exists ? tab[k][r] : false;
+                    return (
+                      <td key={k + String(r)}>
+                        {exists ? (
+                          <button
+                            className={cellCls(on)}
+                            onClick={() => toggle(k, r)}
+                            disabled={!canScore}
+                            title={`${cfg.points} pontos`}
+                          >
+                            {on ? cfg.points : ""}
+                          </button>
+                        ) : (
+                          <div className="cell-btn" />
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td>
+                    <div className="cell-btn" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th>SOMA</th>
+                {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
+                  <td key={"s" + k} className="summary">
+                    {somaCol[k]}
+                  </td>
+                ))}
+                <td className="summary">{somaDes}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      {/* Marcadores — colunas = Tentativas; linhas = Marcadores; 1 seleção por linha */}
+      <section className="card p-3 md:p-5">
+        <h2 className="mb-3 grid-head">MARCADORES</h2>
+        <div className="sheet">
+          <table>
+            <thead>
+              <tr>
+                <th>Marcador</th>
+                <th>Tentativa 1 (100)</th>
+                <th>Tentativa 2 (75)</th>
+                <th>Tentativa 3 (50)</th>
+                <th>SOMA</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(MARKERS as Marker[]).map((m) => (
+                <tr key={`row-m${m}`}>
+                  <td className="font-medium">{`Marcador ${m}`}</td>
+                  {ATTEMPTS.map((t) => {
+                    const ativo = markerPick[m] === t;
                     return (
                       <td key={`m${m}t${t}`}>
                         <button
-                          className={`cell-btn ${ativo ? "is-on" : "is-off"} ${
-                            canScore ? "" : "opacity-50 cursor-not-allowed"
-                          }`}
-                          onClick={() => pick(t, ativo ? 0 : m)}
+                          className={`cell-btn ${ativo ? "is-on" : "is-off"} ${canScore ? "" : "opacity-50 cursor-not-allowed"}`}
+                          onClick={() => pickMarker(m, t)}
                           disabled={!canScore}
+                          title={`Marcador ${m} — Tentativa ${t}`}
                         >
                           {ativo ? MARC[t] : ""}
                         </button>
                       </td>
                     );
                   })}
+                  <td className="summary">{markerPick[m] ? MARC[markerPick[m] as Attempt] : 0}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <th>SOMA</th>
+                <td className="summary">{markerPick[1] === 1 ? 100 : 0 + 0}</td>
+                <td className="summary">{markerPick[1] === 2 ? 75 : 0 + 0}</td>
+                <td className="summary">{markerPick[1] === 3 ? 50 : 0 + 0}</td>
+                <td className="summary">{somaMar}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </section>
@@ -265,9 +356,9 @@ function Planilha() {
             <thead>
               <tr>
                 <th>Mina</th>
-                {ATTEMPTS.map((t) => (
-                  <th key={`mina${t}`}>{`Tentativa ${t}`}</th>
-                ))}
+                <th>Tentativa 1 (1,5x)</th>
+                <th>Tentativa 2 (1,25x)</th>
+                <th>Tentativa 3 (1,15x)</th>
                 <th>Multiplicador</th>
               </tr>
             </thead>
