@@ -20,7 +20,7 @@ const DESAFIOS: Record<DKey, { title: string; points: number; rows: number }> = 
   obstaculo: { title: "Obstáculo (20)", points: 20, rows: 5 },
   intercepcao: { title: "Intercepção (20)", points: 20, rows: 5 },
   chegada: { title: "Chegada (20)", points: 20, rows: 5 },
-  fato: { title: "Fato Histórico (50)", points: 50, rows: 5 },
+  fato: { title: "Fato Histórico (50)", points: 50, rows: 5 }, // Alterado para 50 pontos
 } as const;
 
 const MARC = { 1: 100, 2: 75, 3: 50 } as const;
@@ -44,7 +44,6 @@ export default function Page() {
 
 function Planilha() {
   const sess = getSession();
-  // Robusto: aceita da sessão ou da URL (?eventId=)
   const eventId =
     sess.eventId ||
     (typeof window !== "undefined"
