@@ -99,9 +99,8 @@ function Planilha() {
   const pick = (t: Attempt, q: 0 | 1 | 2) => {
     if (!canScore) return;
     setMark((p) => {
-      // Ajuste para garantir que apenas uma seleção por coluna seja permitida
-      const newMark = { ...p, [t]: q }; 
-      
+      const newMark = { ...p, [t]: q };
+
       // Limpa as tentativas anteriores da mesma coluna
       if (t === 1) newMark[2] = 0; // Desmarca a tentativa 2 quando a tentativa 1 for marcada
       if (t === 2) newMark[1] = 0; // Desmarca a tentativa 1 quando a tentativa 2 for marcada
@@ -225,78 +224,17 @@ function Planilha() {
           <table>
             <thead>
               <tr>
-                <th className="w-28"></th>
-                {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
-                  <th key={k}>{DESAFIOS[k].title}</th>
+                <th>Desafio</th>
+                {MARKERS.map((m) => (
+                  <th key={m}>Marcador {m}</th>
                 ))}
-                <th className="w-28">SOMA</th>
               </tr>
             </thead>
             <tbody>
-              {Array.from({ length: maxRows }).map((_, r) => (
-                <tr key={r}>
-                  <td></td>
-                  {(Object.keys(DESAFIOS) as DKey[]).map((k) => {
-                    const cfg = DESAFIOS[k];
-                    const exists = r < cfg.rows;
-                    const on = exists ? tab[k][r] : false;
-                    return (
-                      <td key={k + String(r)}>
-                        {exists ? (
-                          <button
-                            className={cellCls(on)}
-                            onClick={() => toggle(k, r)}
-                            disabled={!canScore}
-                            title={`${cfg.points} pontos`}
-                          >
-                            {on ? cfg.points : ""}
-                          </button>
-                        ) : (
-                          <div className="cell-btn" />
-                        )}
-                      </td>
-                    );
-                  })}
-                  <td>
-                    <div className="cell-btn" />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th>SOMA</th>
-                {(Object.keys(DESAFIOS) as DKey[]).map((k) => (
-                  <td key={"s" + k} className="summary">
-                    {somaCol[k]}
-                  </td>
-                ))}
-                <td className="summary">{somaDes}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </section>
-
-      {/* Marcadores */}
-      <section className="card p-3 md:p-5">
-        <h2 className="mb-3 grid-head">MARCADORES</h2>
-        <div className="sheet">
-          <table>
-            <thead>
-              <tr>
-                <th>Marcador</th>
-                <th>Tentativa 1 (100)</th>
-                <th>Tentativa 2 (75)</th>
-                <th>Tentativa 3 (50)</th>
-                <th>SOMA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {MARKERS.map((m) => (
-                <tr key={"m" + m}>
-                  <td className="font-medium">{`Marcador ${m}`}</td>
-                  {ATTEMPTS.map((t) => {
+              {ATTEMPTS.map((t) => (
+                <tr key={`t${t}`}>
+                  <td>Tentativa {t}</td>
+                  {MARKERS.map((m) => {
                     const ativo = mark[t] === m;
                     return (
                       <td key={`m${m}t${t}`}>
@@ -312,23 +250,9 @@ function Planilha() {
                       </td>
                     );
                   })}
-                  <td>
-                    <div className="cell-btn"></div>
-                  </td>
                 </tr>
               ))}
             </tbody>
-            <tfoot>
-              <tr>
-                <th>SOMA</th>
-                <td className="summary">{mark[1] ? 100 : 0}</td>
-                <td className="summary">{mark[2] ? 75 : 0}</td>
-                <td className="summary">{mark[3] ? 50 : 0}</td>
-                <td className="summary">
-                  {ATTEMPTS.reduce((a, t) => a + (mark[t] ? MARC[t] : 0), 0)}
-                </td>
-              </tr>
-            </tfoot>
           </table>
         </div>
       </section>
@@ -341,9 +265,9 @@ function Planilha() {
             <thead>
               <tr>
                 <th>Mina</th>
-                <th>Tentativa 1 (1,5x)</th>
-                <th>Tentativa 2 (1,25x)</th>
-                <th>Tentativa 3 (1,15x)</th>
+                {ATTEMPTS.map((t) => (
+                  <th key={`mina${t}`}>{`Tentativa ${t}`}</th>
+                ))}
                 <th>Multiplicador</th>
               </tr>
             </thead>
