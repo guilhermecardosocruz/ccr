@@ -85,17 +85,13 @@ function Planilha() {
   /** Placar — Desafios */
   const [tab, setTab] = useState(makeState());
 
-  /** Placar — Marcadores
-   * Regra: 1 tentativa por marcador (linha). 0 = nenhuma; 1/2/3 = tentativa escolhida.
-   */
+  /** Placar — Marcadores: 1 tentativa por marcador (linha). 0 = nenhuma; 1/2/3 = tentativa. */
   const [markerPick, setMarkerPick] = useState<Record<Marker, 0 | Attempt>>({ 1: 0, 2: 0 });
 
   /** Mina (exclusiva entre tentativas) */
   const [mina, setMina] = useState<0 | Attempt>(0);
 
-  /** Pode pontuar: time escolhido e ainda há tempo (>0).
-   * -> edição liberada tanto rodando quanto pausado (conferência).
-   */
+  /** Pode pontuar: time escolhido e há tempo (>0). Edição liberada mesmo pausado. */
   const canScore = Boolean(selected) && timeLeft > 0;
 
   const toggle = (d: DKey, i: number) => {
@@ -124,11 +120,21 @@ function Planilha() {
 
   const somaDes = (Object.keys(DESAFIOS) as DKey[]).reduce((a, k) => a + somaCol[k], 0);
 
-  // Soma dos marcadores = soma das tentativas escolhidas por marcador
-  const somaMar = (MARKERS as Marker[]).reduce((a, m) => {
-    const t = markerPick[m];
-    return a + (t ? MARC[t] : 0);
-  }, 0);
+  // Soma por tentativa (colunas) e soma total dos marcadores — sem quebrar readonly
+  const sumAttempt = useMemo(() => {
+    const s: Record<Attempt, number> = { 1: 0, 2: 0, 3: 0 };
+    for (const m of MARKERS) {
+      const t = markerPick[m as Marker];
+      if (t) s[t] += MARC[t];
+    }
+    return s;
+  }, [markerPick]);
+
+  const somaMar = useMemo(() => {
+    let total = 0;
+    for (const t of ATTEMPTS) total += sumAttempt[t];
+    return total;
+  }, [sumAttempt]);
 
   const mult = mina === 0 ? 1 : MINA[mina];
   const total = Number(((somaDes + somaMar) * mult).toFixed(2));
@@ -313,7 +319,7 @@ function Planilha() {
               </tr>
             </thead>
             <tbody>
-              {(MARKERS as Marker[]).map((m) => (
+              {(MARKERS as readonly Marker[]).map((m) => (
                 <tr key={`row-m${m}`}>
                   <td className="font-medium">{`Marcador ${m}`}</td>
                   {ATTEMPTS.map((t) => {
@@ -338,9 +344,9 @@ function Planilha() {
             <tfoot>
               <tr>
                 <th>SOMA</th>
-                <td className="summary">{markerPick[1] === 1 ? 100 : 0 + 0}</td>
-                <td className="summary">{markerPick[1] === 2 ? 75 : 0 + 0}</td>
-                <td className="summary">{markerPick[1] === 3 ? 50 : 0 + 0}</td>
+                <td className="summary">{sumAttempt[1]}</td>
+                <td className="summary">{sumAttempt[2]}</td>
+                <td className="summary">{sumAttempt[3]}</td>
                 <td className="summary">{somaMar}</td>
               </tr>
             </tfoot>
