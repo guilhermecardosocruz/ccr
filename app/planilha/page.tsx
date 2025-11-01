@@ -101,9 +101,10 @@ function Planilha() {
     setMark((p) => {
       // Ajuste para garantir que apenas uma seleção por coluna seja permitida
       const newMark = { ...p, [t]: q }; 
+      
       // Limpa as tentativas anteriores da mesma coluna
-      if (t === 1) newMark[2] = 0; 
-      if (t === 2) newMark[1] = 0;
+      if (t === 1) newMark[2] = 0; // Desmarca a tentativa 2 quando a tentativa 1 for marcada
+      if (t === 2) newMark[1] = 0; // Desmarca a tentativa 1 quando a tentativa 2 for marcada
       return newMark;
     });
   };
