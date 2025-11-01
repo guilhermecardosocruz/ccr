@@ -64,9 +64,7 @@ function Planilha() {
   const [timeLeft, setTimeLeft] = useState(durationMin * 60);
   const [running, setRunning] = useState(false);
 
-  useEffect(() => {
-    if (!running) setTimeLeft(durationMin * 60);
-  }, [durationMin, running]);
+  useEffect(() => { setTimeLeft(durationMin * 60); }, [durationMin]);
 
   useEffect(() => {
     if (!running) return;
